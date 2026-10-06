@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "RoadWatch",
+    "slug": "roadwatch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090d16"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#090d16"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "roadwatch",
+    "plugins": [
+      "expo-video",
+      ["expo-camera", {
+        "cameraPermission": "Allow RoadWatch to record traffic evidence",
+        "microphonePermission": "Allow RoadWatch to capture audio with traffic evidence",
+        "recordAudioAndroid": true
+      }],
+      ["expo-location", {
+        "locationWhenInUsePermission": "Allow RoadWatch to attach location to traffic evidence"
+      }]
+    ]
+  }
+}
