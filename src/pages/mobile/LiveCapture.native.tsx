@@ -27,10 +27,33 @@ export function LiveCaptureNative({ onCapture }: LiveCaptureNativeProps) {
   const [micPermission, askMic] = useMicrophonePermissions();
   const [cameraReady, setCameraReady] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [recordingDurationSec, setRecordingDurationSec] = useState(0);
   const [preparing, setPreparing] = useState(false);
   const [gps, setGps] = useState<{ latitude: number; longitude: number; accuracy: number | null } | null>(null);
   const [now, setNow] = useState(new Date());
+
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    if (recording) {
+      setRecordingDurationSec(0);
+      timer = setInterval(() => {
+        setRecordingDurationSec(prev => prev + 1);
+      }, 1000);
+    } else {
+      setRecordingDurationSec(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [recording]);
+
+  const formatDuration = (sec: number) => {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   async function start() {
     if (recordingNow.current) return;
@@ -65,9 +88,18 @@ export function LiveCaptureNative({ onCapture }: LiveCaptureNativeProps) {
 
         {/* Telemetry HUD */}
         <View style={styles.hudTop}>
-          <View style={styles.timeBadge}>
-            <Text style={styles.timeText}>{now.toLocaleTimeString()}</Text>
-            <Text style={styles.dateText}>{now.toLocaleDateString()}</Text>
+          <View style={styles.topHeaderRow}>
+            {recording && (
+              <View style={styles.recBadge}>
+                <View style={styles.recDot} />
+                <Text style={styles.recText}>REC {formatDuration(recordingDurationSec)}</Text>
+                <Text style={styles.recMaxText}>/ 00:10</Text>
+              </View>
+            )}
+            <View style={styles.timeBadge}>
+              <Text style={styles.timeText}>{now.toLocaleTimeString()}</Text>
+              <Text style={styles.dateText}>{now.toLocaleDateString()}</Text>
+            </View>
           </View>
 
           <View style={styles.gpsRow}>
@@ -89,21 +121,29 @@ export function LiveCaptureNative({ onCapture }: LiveCaptureNativeProps) {
               <Text style={styles.reticleTagText}>FRAME GUIDE</Text>
             </View>
           </View>
-          <View style={styles.scanBadge}>
-            <Scan size={14} color={Colors.telemetry} />
-            <Text style={styles.scanText}>{!permission?.granted ? 'TAP BELOW TO ALLOW CAMERA' : recording ? 'RECORDING · TAP TO STOP' : preparing ? 'GETTING GPS' : 'READY TO RECORD · STOP SAFELY'}</Text>
+          <View style={[styles.scanBadge, recording && styles.scanBadgeRecording]}>
+            <Scan size={14} color={recording ? Colors.signal : Colors.telemetry} />
+            <Text style={[styles.scanText, recording && styles.scanTextRecording]}>
+              {!permission?.granted
+                ? 'TAP BELOW TO ALLOW CAMERA'
+                : recording
+                ? `RECORDING (${formatDuration(recordingDurationSec)}) · TAP TO STOP`
+                : preparing
+                ? 'GETTING GPS'
+                : 'READY TO RECORD · STOP SAFELY'}
+            </Text>
           </View>
         </View>
 
         {/* Shutter controls */}
         <View style={styles.controlsRow}>
           <TouchableOpacity
-            style={styles.shutterButton}
+            style={[styles.shutterButton, recording && styles.shutterButtonRecording]}
             onPress={recording ? () => camera.current?.stopRecording() : start}
             disabled={preparing}
             activeOpacity={0.8}
           >
-            <Video size={28} color={Colors.canvas} />
+            <Video size={28} color={recording ? Colors.signal : Colors.canvas} />
           </TouchableOpacity>
         </View>
       </View>
@@ -126,6 +166,38 @@ const styles = StyleSheet.create({
   },
   hudTop: {
     padding: 16,
+  },
+  topHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  recBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.25)',
+    borderWidth: 1,
+    borderColor: Colors.signal,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+  },
+  recDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.signal,
+  },
+  recText: {
+    color: Colors.signal,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  recMaxText: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 11,
+    fontWeight: '600',
   },
   timeBadge: {
     alignSelf: 'flex-end',
@@ -223,11 +295,18 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 6,
   },
+  scanBadgeRecording: {
+    borderColor: 'rgba(239, 68, 68, 0.7)',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
   scanText: {
     color: Colors.telemetry,
     fontSize: 10,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+  },
+  scanTextRecording: {
+    color: Colors.signal,
   },
   controlsRow: {
     flexDirection: 'row',
@@ -248,6 +327,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245, 158, 11, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  shutterButtonRecording: {
+    backgroundColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: Colors.signal,
   },
   switchButton: {
     width: 44,
