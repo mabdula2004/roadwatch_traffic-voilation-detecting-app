@@ -15,11 +15,11 @@ import * as Location from 'expo-location';
 import * as Crypto from 'expo-crypto';
 import type { CapturedClip } from '../../lib/report';
 
-interface LiveCaptureNativeProps {
+interface LiveCaptureProps {
   onCapture: (clip: CapturedClip) => void;
 }
 
-export function LiveCaptureNative({ onCapture }: LiveCaptureNativeProps) {
+export function LiveCapture({ onCapture }: LiveCaptureProps) {
   const { colors, resolvedTheme } = useTheme();
   const camera = useRef<CameraView>(null);
   const recordingNow = useRef(false);

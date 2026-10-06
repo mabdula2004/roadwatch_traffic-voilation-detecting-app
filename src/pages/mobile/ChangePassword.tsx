@@ -4,11 +4,11 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert 
 import { ChevronLeft, KeyRound, Eye, EyeOff, CheckCircle2 } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 
-interface ChangePasswordNativeProps {
+interface ChangePasswordProps {
   onBack: () => void;
 }
 
-export function ChangePasswordNative({ onBack }: ChangePasswordNativeProps) {
+export function ChangePassword({ onBack }: ChangePasswordProps) {
   const { colors, resolvedTheme } = useTheme();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');

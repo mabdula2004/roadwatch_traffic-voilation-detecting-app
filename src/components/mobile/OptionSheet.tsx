@@ -16,7 +16,7 @@ interface Option<T extends string> {
   label: string;
 }
 
-interface OptionSheetNativeProps<T extends string> {
+interface OptionSheetProps<T extends string> {
   open: boolean;
   title: string;
   options: Option<T>[];
@@ -25,14 +25,14 @@ interface OptionSheetNativeProps<T extends string> {
   onClose: () => void;
 }
 
-export function OptionSheetNative<T extends string>({
+export function OptionSheet<T extends string>({
   open,
   title,
   options,
   value,
   onSelect,
   onClose,
-}: OptionSheetNativeProps<T>) {
+}: OptionSheetProps<T>) {
   const { colors } = useTheme();
 
   return (

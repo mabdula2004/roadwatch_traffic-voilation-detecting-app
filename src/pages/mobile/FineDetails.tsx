@@ -6,12 +6,12 @@ import { Colors } from '../../constants/theme';
 import { fines } from '../../data/fines';
 import { media, type MediaKey } from '../../data/media';
 
-interface FineDetailsNativeProps {
+interface FineDetailsProps {
   fineId?: string;
   onBack: () => void;
 }
 
-export function FineDetailsNative({ fineId, onBack }: FineDetailsNativeProps) {
+export function FineDetails({ fineId, onBack }: FineDetailsProps) {
   const { colors, resolvedTheme } = useTheme();
   const fine = fines.find((f) => f.id === fineId) ?? fines[0];
 

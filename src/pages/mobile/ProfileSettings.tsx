@@ -5,11 +5,11 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { Colors } from '../../constants/theme';
 
-interface ProfileSettingsNativeProps {
+interface ProfileSettingsProps {
   onBack: () => void;
 }
 
-export function ProfileSettingsNative({ onBack }: ProfileSettingsNativeProps) {
+export function ProfileSettings({ onBack }: ProfileSettingsProps) {
   const { colors } = useTheme();
   const { profile, updateProfile } = useUserProfile();
 

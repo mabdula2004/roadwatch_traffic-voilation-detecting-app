@@ -4,12 +4,12 @@ import { Siren, Phone, EyeOff, Search, ChevronRight } from 'lucide-react-native'
 import { useTheme } from '../../contexts/ThemeContext';
 import { Colors } from '../../constants/theme';
 
-interface SafetySettingsNativeProps {
+interface SafetySettingsProps {
   onBack: () => void;
   onOpenPlateSearch: () => void;
 }
 
-export function SafetySettingsNative({ onBack, onOpenPlateSearch }: SafetySettingsNativeProps) {
+export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProps) {
   const { colors } = useTheme();
   const [blurFaces, setBlurFaces] = useState(false);
 

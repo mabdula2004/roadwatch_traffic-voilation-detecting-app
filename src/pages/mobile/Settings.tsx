@@ -25,16 +25,16 @@ import { Colors } from '../../constants/theme';
 import { useUserProfile } from '../../contexts/UserContext';
 import { useTheme, type Theme } from '../../contexts/ThemeContext';
 import { useLanguage, type Language } from '../../contexts/LanguageContext';
-import { OptionSheetNative } from '../../components/mobile/OptionSheet.native';
-import { NotificationSheetNative } from '../../components/mobile/NotificationSheet.native';
+import { OptionSheet } from '../../components/mobile/OptionSheet';
+import { NotificationSheet } from '../../components/mobile/NotificationSheet';
 import { supabase } from '../../lib/supabase';
 
-interface SettingsNativeProps {
+interface SettingsProps {
   onLogout?: () => void;
   onNavigate?: (screen: string) => void;
 }
 
-export function SettingsNative({ onLogout, onNavigate }: SettingsNativeProps) {
+export function Settings({ onLogout, onNavigate }: SettingsProps) {
   const { profile } = useUserProfile();
   const { theme, setTheme, colors } = useTheme();
   const { language, setLanguage, t, isUrdu } = useLanguage();
@@ -251,7 +251,7 @@ export function SettingsNative({ onLogout, onNavigate }: SettingsNativeProps) {
         </TouchableOpacity>
 
         {/* Option Sheets & Notifications Sheet */}
-        <OptionSheetNative
+        <OptionSheet
           open={sheet === 'language'}
           title={t('language')}
           options={langOptions}
@@ -260,7 +260,7 @@ export function SettingsNative({ onLogout, onNavigate }: SettingsNativeProps) {
           onClose={() => setSheet(null)}
         />
 
-        <OptionSheetNative
+        <OptionSheet
           open={sheet === 'theme'}
           title={t('theme')}
           options={themeOptionsList}
@@ -269,7 +269,7 @@ export function SettingsNative({ onLogout, onNavigate }: SettingsNativeProps) {
           onClose={() => setSheet(null)}
         />
 
-        <NotificationSheetNative
+        <NotificationSheet
           open={notificationsOpen}
           onClose={() => setNotificationsOpen(false)}
         />

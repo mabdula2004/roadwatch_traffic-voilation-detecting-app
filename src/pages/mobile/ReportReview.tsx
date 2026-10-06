@@ -7,7 +7,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { File } from 'expo-file-system';
 import { uploadReport, type CapturedClip } from '../../lib/report';
 
-interface ReportReviewNativeProps {
+interface ReportReviewProps {
   clip: CapturedClip;
   onBack: () => void;
   onSubmit: (id: string) => void;
@@ -20,7 +20,7 @@ const classes = [
   ['helmet_violation', 'No helmet'], ['blocking_crossing', 'Crossing blocked'],
 ] as const;
 
-export function ReportReviewNative({ clip, onBack, onSubmit }: ReportReviewNativeProps) {
+export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const { colors, resolvedTheme } = useTheme();
   const [submitting, setSubmitting] = useState(false);
   const [claimedClass, setClaimedClass] = useState<string>(classes[0][0]);

@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 
 import { ChevronLeft, Search, CheckCircle2, AlertTriangle, Car } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 
-interface PlateSearchNativeProps {
+interface PlateSearchProps {
   onBack: () => void;
 }
 
@@ -20,7 +20,7 @@ interface Record {
 
 const registry: Record[] = [];
 
-export function PlateSearchNative({ onBack }: PlateSearchNativeProps) {
+export function PlateSearch({ onBack }: PlateSearchProps) {
   const { colors, resolvedTheme } = useTheme();
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<Record | null>(null);

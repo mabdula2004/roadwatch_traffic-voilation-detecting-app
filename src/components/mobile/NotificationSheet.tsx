@@ -29,15 +29,15 @@ export interface AppNotification {
 
 const defaultNotifications: AppNotification[] = [];
 
-interface NotificationSheetNativeProps {
+interface NotificationSheetProps {
   open: boolean;
   onClose: () => void;
 }
 
-export function NotificationSheetNative({
+export function NotificationSheet({
   open,
   onClose,
-}: NotificationSheetNativeProps) {
+}: NotificationSheetProps) {
   const { colors } = useTheme();
 
   return (

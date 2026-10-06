@@ -6,18 +6,18 @@ import { Colors } from './src/constants/theme';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { LanguageProvider } from './src/contexts/LanguageContext';
 import { UserProvider } from './src/contexts/UserContext';
-import { OnboardingNative } from './src/pages/mobile/Onboarding.native';
-import { LiveCaptureNative } from './src/pages/mobile/LiveCapture.native';
-import { ReportReviewNative } from './src/pages/mobile/ReportReview.native';
-import { VaultNative } from './src/pages/mobile/Vault.native';
-import { WalletNative } from './src/pages/mobile/Wallet.native';
-import { FineDetailsNative } from './src/pages/mobile/FineDetails.native';
-import { PlateSearchNative } from './src/pages/mobile/PlateSearch.native';
-import { SafetySettingsNative } from './src/pages/mobile/SafetySettings.native';
-import { SettingsNative } from './src/pages/mobile/Settings.native';
-import { ProfileSettingsNative } from './src/pages/mobile/ProfileSettings.native';
-import { ChangePasswordNative } from './src/pages/mobile/ChangePassword.native';
-import { BottomNav } from './src/components/mobile/BottomNav.native';
+import { Onboarding } from './src/pages/mobile/Onboarding';
+import { LiveCapture } from './src/pages/mobile/LiveCapture';
+import { ReportReview } from './src/pages/mobile/ReportReview';
+import { Vault } from './src/pages/mobile/Vault';
+import { Wallet } from './src/pages/mobile/Wallet';
+import { FineDetails } from './src/pages/mobile/FineDetails';
+import { PlateSearch } from './src/pages/mobile/PlateSearch';
+import { SafetySettings } from './src/pages/mobile/SafetySettings';
+import { Settings } from './src/pages/mobile/Settings';
+import { ProfileSettings } from './src/pages/mobile/ProfileSettings';
+import { ChangePassword } from './src/pages/mobile/ChangePassword';
+import { BottomNav } from './src/components/mobile/BottomNav';
 
 function MainApp() {
   const { colors } = useTheme();
@@ -50,7 +50,7 @@ function MainApp() {
   if (!ready) return <View style={[styles.loading, { backgroundColor: colors.canvas }]}><ActivityIndicator color={colors.telemetry} /></View>;
 
   if (!isOnboarded) {
-    return <OnboardingNative onComplete={() => setIsOnboarded(true)} />;
+    return <Onboarding onComplete={() => setIsOnboarded(true)} />;
   }
 
   // Determine if bottom navigation bar should be visible
@@ -66,45 +66,45 @@ function MainApp() {
     <View style={[styles.container, { backgroundColor: colors.canvas }]}>
       <View style={styles.content}>
         {activeScreen === 'capture' && (
-          <LiveCaptureNative onCapture={(newClip) => { setClip(newClip); setActiveScreen('review'); }} />
+          <LiveCapture onCapture={(newClip) => { setClip(newClip); setActiveScreen('review'); }} />
         )}
 
         {activeScreen === 'review' && clip && (
-          <ReportReviewNative
+          <ReportReview
             clip={clip}
             onBack={() => { setClip(null); setActiveScreen('capture'); }}
             onSubmit={() => { setClip(null); setActiveScreen('vault'); }}
           />
         )}
 
-        {activeScreen === 'vault' && <VaultNative />}
+        {activeScreen === 'vault' && <Vault />}
 
-        {activeScreen === 'wallet' && <WalletNative />}
+        {activeScreen === 'wallet' && <Wallet />}
 
         {activeScreen === 'search' && (
-          <PlateSearchNative onBack={() => setActiveScreen('safety')} />
+          <PlateSearch onBack={() => setActiveScreen('safety')} />
         )}
 
         {activeScreen === 'safety' && (
-          <SafetySettingsNative
+          <SafetySettings
             onBack={() => setActiveScreen('settings')}
             onOpenPlateSearch={() => setActiveScreen('search')}
           />
         )}
 
         {activeScreen === 'settings' && (
-          <SettingsNative
+          <Settings
             onLogout={() => { void supabase.auth.signOut(); }}
             onNavigate={(screen) => setActiveScreen(screen)}
           />
         )}
 
         {activeScreen === 'profile' && (
-          <ProfileSettingsNative onBack={() => setActiveScreen('settings')} />
+          <ProfileSettings onBack={() => setActiveScreen('settings')} />
         )}
 
         {activeScreen === 'password' && (
-          <ChangePasswordNative onBack={() => setActiveScreen('settings')} />
+          <ChangePassword onBack={() => setActiveScreen('settings')} />
         )}
       </View>
 

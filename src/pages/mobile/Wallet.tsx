@@ -13,11 +13,11 @@ import { Colors } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
 import { useUserProfile } from '../../contexts/UserContext';
 
-interface WalletNativeProps {
+interface WalletProps {
   onSelectFine?: (fineId: string) => void;
 }
 
-export function WalletNative({ onSelectFine }: WalletNativeProps) {
+export function Wallet({ onSelectFine }: WalletProps) {
   const { colors } = useTheme();
   const { profile } = useUserProfile();
   const [wallet, setWallet] = useState<{ balance: number; pending_clearance: number; epay_linked: boolean } | null>(null);

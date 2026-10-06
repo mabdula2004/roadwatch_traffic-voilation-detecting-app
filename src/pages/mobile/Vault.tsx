@@ -15,7 +15,7 @@ import { supabase } from '../../lib/supabase';
 
 type ReportRow = { report_id: string; claimed_class: string; captured_at: string; status: string; geo_lat: number | null; geo_long: number | null };
 
-export function VaultNative() {
+export function Vault() {
   const { colors } = useTheme();
   const [activeTab, setActiveTab] = useState<'pending' | 'sealed'>('pending');
   const [reports, setReports] = useState<ReportRow[]>([]);

@@ -14,7 +14,7 @@ import { ShieldCheck, Check, AlertTriangle, Eye, EyeOff, Lock } from 'lucide-rea
 
 import { Colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
-import { OtpInput } from '../../components/mobile/OtpInput.native';
+import { OtpInput } from '../../components/mobile/OtpInput';
 import { supabase } from '../../lib/supabase';
 import { useUserProfile } from '../../contexts/UserContext';
 
@@ -54,11 +54,11 @@ const safetyPoints = [
   'Only upload footage that you are permitted to share.',
 ];
 
-interface OnboardingNativeProps {
+interface OnboardingProps {
   onComplete: () => void;
 }
 
-export function OnboardingNative({ onComplete }: OnboardingNativeProps) {
+export function Onboarding({ onComplete }: OnboardingProps) {
   const { colors, resolvedTheme } = useTheme();
   const { refreshProfile } = useUserProfile();
   const [name, setName] = useState('');

@@ -2,7 +2,7 @@ import React from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 
-export function SafetyLiveNative() {
+export function SafetyLive() {
   const { colors } = useTheme();
   return <View style={[styles.root, { backgroundColor: colors.canvas }]}>
     <Text style={[styles.title, { color: colors.ink }]}>Safety</Text>
