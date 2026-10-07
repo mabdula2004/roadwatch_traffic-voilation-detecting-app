@@ -82,6 +82,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetSentMsg, setResetSentMsg] = useState('');
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -248,6 +250,27 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     }
   }
 
+  async function handleForgotPassword() {
+    if (busy) return;
+    if (!emailValid(loginEmail)) {
+      setError('Please enter your registered email address.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setResetSentMsg('');
+    try {
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(loginEmail.trim());
+      if (resetErr) throw resetErr;
+      setResetSentMsg(`Password reset instructions have been sent to ${loginEmail.trim()}! Please check your email.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not send password reset request.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const readyToCreate =
     name.trim().length > 2 &&
     cnicValid(cnic) &&
@@ -299,15 +322,21 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         {mode === 'signin' ? (
           /* Sign In Screen */
           <View style={styles.stepCard}>
-            <Text style={styles.stepTitle}>Sign In to RoadWatch</Text>
-            <Text style={styles.hintText}>Enter your email and password to log in.</Text>
+            <Text style={styles.stepTitle}>
+              {showForgotPassword ? 'Reset Password' : 'Sign In to RoadWatch'}
+            </Text>
+            <Text style={styles.hintText}>
+              {showForgotPassword
+                ? 'Enter your email address to receive a password reset link / OTP code.'
+                : 'Enter your email and password to log in.'}
+            </Text>
 
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>Email Address</Text>
               <TextInput
                 style={styles.input}
                 value={loginEmail}
-                onChangeText={(v) => { setLoginEmail(v); setError(''); }}
+                onChangeText={(v) => { setLoginEmail(v); setError(''); setResetSentMsg(''); }}
                 placeholder="you@example.com"
                 placeholderTextColor="#6b7280"
                 keyboardType="email-address"
@@ -315,31 +344,62 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               />
             </View>
 
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Password</Text>
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.input}
-                  value={loginPassword}
-                  onChangeText={(v) => { setLoginPassword(v); setError(''); }}
-                  placeholder="Enter your password"
-                  placeholderTextColor="#6b7280"
-                  secureTextEntry={!showLoginPassword}
-                />
-                <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowLoginPassword(!showLoginPassword)}>
-                  {showLoginPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
-                </TouchableOpacity>
+            {!showForgotPassword && (
+              <View style={styles.fieldGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Password</Text>
+                  <TouchableOpacity onPress={() => { setShowForgotPassword(true); setError(''); setResetSentMsg(''); }}>
+                    <Text style={{ fontSize: 12, color: colors.telemetry, fontWeight: '600' }}>Forgot password?</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.input}
+                    value={loginPassword}
+                    onChangeText={(v) => { setLoginPassword(v); setError(''); }}
+                    placeholder="Enter your password"
+                    placeholderTextColor="#6b7280"
+                    secureTextEntry={!showLoginPassword}
+                  />
+                  <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowLoginPassword(!showLoginPassword)}>
+                    {showLoginPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            )}
 
-            <TouchableOpacity
-              style={[styles.primaryButton, busy && styles.buttonDisabled]}
-              disabled={busy}
-              onPress={handleLogin}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryButtonText}>{busy ? 'Signing In…' : 'Sign In'}</Text>
-            </TouchableOpacity>
+            {!!resetSentMsg && (
+              <Text style={[styles.successHint, { marginBottom: 12 }]}>{resetSentMsg}</Text>
+            )}
+
+            {showForgotPassword ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                  disabled={busy}
+                  onPress={handleForgotPassword}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryButtonText}>{busy ? 'Sending Reset Request…' : 'Send Password Reset Link'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ marginTop: 14, alignItems: 'center' }}
+                  onPress={() => { setShowForgotPassword(false); setError(''); setResetSentMsg(''); }}
+                >
+                  <Text style={{ fontSize: 13, color: Colors.muted, fontWeight: '600' }}>Back to Sign In</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity
+                style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                disabled={busy}
+                onPress={handleLogin}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryButtonText}>{busy ? 'Signing In…' : 'Sign In'}</Text>
+              </TouchableOpacity>
+            )}
             {busy && <ActivityIndicator color={colors.telemetry} style={{ marginTop: 10 }} />}
           </View>
         ) : (
