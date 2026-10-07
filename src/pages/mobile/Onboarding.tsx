@@ -109,7 +109,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setCodeSentSuccess(false);
     try {
       const targetEmail = email.trim();
-      const { error: otpErr } = await supabase.auth.signInWithOtp({ email: targetEmail });
+      const { error: otpErr } = await supabase.auth.signInWithOtp({
+        email: targetEmail,
+        options: {
+          shouldCreateUser: true,
+        },
+      });
       if (otpErr) throw otpErr;
       setSentEmail(targetEmail);
       setCodeSentSuccess(true);
