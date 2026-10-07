@@ -85,6 +85,14 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetSentMsg, setResetSentMsg] = useState('');
 
+  // Password Reset OTP Fields
+  const [resetCodeSent, setResetCodeSent] = useState(false);
+  const [resetOtp, setResetOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [codeSentSuccess, setCodeSentSuccess] = useState(false);
@@ -250,7 +258,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     }
   }
 
-  async function handleForgotPassword() {
+  async function handleSendResetOtp() {
     if (busy) return;
     if (!emailValid(loginEmail)) {
       setError('Please enter your registered email address.');
@@ -261,11 +269,54 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setError('');
     setResetSentMsg('');
     try {
-      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(loginEmail.trim());
+      const { error: resetErr } = await supabase.auth.signInWithOtp({
+        email: loginEmail.trim(),
+        options: { shouldCreateUser: false },
+      });
       if (resetErr) throw resetErr;
-      setResetSentMsg(`Password reset instructions have been sent to ${loginEmail.trim()}! Please check your email.`);
+      setResetCodeSent(true);
+      setResetSentMsg(`A 6-digit reset code has been sent to ${loginEmail.trim()}. Check your email!`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not send password reset request.');
+      setError(cause instanceof Error ? cause.message : 'Could not send reset code to email.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleConfirmPasswordReset() {
+    if (busy) return;
+    if (!resetOtp || resetOtp.length < 6) {
+      setError('Please enter the 6-digit reset code.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError('Please enter a new password with at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError('New passwords do not match.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      // 1. Verify OTP token to create active session
+      const { error: verifyErr } = await supabase.auth.verifyOtp({
+        email: loginEmail.trim(),
+        token: resetOtp,
+        type: 'email',
+      });
+      if (verifyErr) throw verifyErr;
+
+      // 2. Update to new password
+      const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateErr) throw updateErr;
+
+      await refreshProfile().catch(() => { });
+      onComplete();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Invalid reset code or failed to update password.');
     } finally {
       setBusy(false);
     }
@@ -374,21 +425,85 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
             {showForgotPassword ? (
               <>
-                <TouchableOpacity
-                  style={[styles.primaryButton, busy && styles.buttonDisabled]}
-                  disabled={busy}
-                  onPress={handleForgotPassword}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.primaryButtonText}>{busy ? 'Sending Reset Request…' : 'Send Password Reset Link'}</Text>
-                </TouchableOpacity>
+                {!resetCodeSent ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                      disabled={busy}
+                      onPress={handleSendResetOtp}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.primaryButtonText}>{busy ? 'Sending Reset Code…' : 'Send 6-Digit Reset Code'}</Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={{ marginTop: 14, alignItems: 'center' }}
-                  onPress={() => { setShowForgotPassword(false); setError(''); setResetSentMsg(''); }}
-                >
-                  <Text style={{ fontSize: 13, color: Colors.muted, fontWeight: '600' }}>Back to Sign In</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{ marginTop: 14, alignItems: 'center' }}
+                      onPress={() => { setShowForgotPassword(false); setResetCodeSent(false); setError(''); setResetSentMsg(''); }}
+                    >
+                      <Text style={{ fontSize: 13, color: Colors.muted, fontWeight: '600' }}>Back to Sign In</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    {/* OTP Code & New Password Fields */}
+                    <View style={styles.verificationBox}>
+                      <Text style={styles.label}>Enter 6-Digit Reset Code</Text>
+                      <View style={styles.otpContainer}>
+                        <OtpInput length={OTP_LENGTH} value={resetOtp} onChange={(val) => { setResetOtp(val); setError(''); }} />
+                      </View>
+                    </View>
+
+                    <View style={styles.fieldGroup}>
+                      <Text style={styles.label}>New Password</Text>
+                      <View style={styles.inputWrapper}>
+                        <TextInput
+                          style={styles.input}
+                          value={newPassword}
+                          onChangeText={(v) => { setNewPassword(v); setError(''); }}
+                          placeholder="At least 6 characters"
+                          placeholderTextColor="#6b7280"
+                          secureTextEntry={!showNewPassword}
+                        />
+                        <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowNewPassword(!showNewPassword)}>
+                          {showNewPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View style={styles.fieldGroup}>
+                      <Text style={styles.label}>Confirm New Password</Text>
+                      <View style={styles.inputWrapper}>
+                        <TextInput
+                          style={styles.input}
+                          value={confirmNewPassword}
+                          onChangeText={(v) => { setConfirmNewPassword(v); setError(''); }}
+                          placeholder="Re-enter new password"
+                          placeholderTextColor="#6b7280"
+                          secureTextEntry={!showConfirmNewPassword}
+                        />
+                        <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowConfirmNewPassword(!showConfirmNewPassword)}>
+                          {showConfirmNewPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                      disabled={busy}
+                      onPress={handleConfirmPasswordReset}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.primaryButtonText}>{busy ? 'Updating Password…' : 'Reset & Save Password'}</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={{ marginTop: 14, alignItems: 'center' }}
+                      onPress={() => { setResetCodeSent(false); setError(''); }}
+                    >
+                      <Text style={{ fontSize: 13, color: Colors.muted, fontWeight: '600' }}>Re-send Code</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </>
             ) : (
               <TouchableOpacity
