@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ShieldCheck, Check, AlertTriangle, Eye, EyeOff, Lock } from 'lucide-react-native';
+import { ShieldCheck, Check, AlertTriangle, Eye, EyeOff, Lock, LogIn, UserPlus } from 'lucide-react-native';
 
 import { Colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -18,9 +18,7 @@ import { OtpInput } from '../../components/mobile/OtpInput';
 import { supabase } from '../../lib/supabase';
 import { useUserProfile } from '../../contexts/UserContext';
 
-// Configurable OTP verification code length (hardcoded to 123456 for demo mode)
 export const OTP_LENGTH = 6;
-export const DEMO_OTP = '123456';
 
 function formatCnic(raw: string) {
   const digits = raw.replace(/\D/g, '').slice(0, 13);
@@ -46,7 +44,7 @@ function formatPakPhone(raw: string): string {
 }
 
 const cnicValid = (v: string) => v.replace(/\D/g, '').length === 13;
-const emailValid = (v: string) => v.length === 0 || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const emailValid = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
 const safetyPoints = [
   'Stop safely before recording. Never hold the phone while driving.',
@@ -61,6 +59,10 @@ interface OnboardingProps {
 export function Onboarding({ onComplete }: OnboardingProps) {
   const { colors, resolvedTheme } = useTheme();
   const { refreshProfile } = useUserProfile();
+
+  const [mode, setMode] = useState<'signup' | 'signin'>('signup');
+
+  // Sign Up Fields
   const [name, setName] = useState('');
   const [cnic, setCnic] = useState('');
   const [phone, setPhone] = useState('');
@@ -70,13 +72,20 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [otp, setOtp] = useState('123456');
+  const [otp, setOtp] = useState('');
   const [resendIn, setResendIn] = useState(0);
   const [agreed, setAgreed] = useState(false);
   const [sentEmail, setSentEmail] = useState('');
   const [verifiedEmail, setVerifiedEmail] = useState('');
+
+  // Sign In Fields
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [codeSentSuccess, setCodeSentSuccess] = useState(false);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -84,41 +93,29 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     return () => clearInterval(t);
   }, [resendIn]);
 
-  const cleanPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
   const passwordValid = password.length >= 6;
   const passwordMatched = passwordValid && password === confirmPassword;
-  const identityDone = name.trim().length > 2 && cnicValid(cnic) && emailValid(email) && email.length > 0 && passwordMatched;
-  const e164 = `+92${cleanPhone}`;
-  const isEmailVerified = (verifiedEmail === email.trim() && !!verifiedEmail) || (emailValid(email) && email.length > 0 && (otp === DEMO_OTP || otp === '123456'));
+  const isEmailVerified = verifiedEmail.toLowerCase() === email.trim().toLowerCase() && !!verifiedEmail;
 
   async function sendCode() {
     if (busy) return;
-    if (name.trim().length <= 2) {
-      setError('Please enter your full name (at least 3 characters).');
-      return;
-    }
-    if (!cnicValid(cnic)) {
-      setError('Please enter a valid 13-digit CNIC number.');
-      return;
-    }
-    if (!emailValid(email) || email.trim().length === 0) {
-      setError('Please enter a valid email address for verification.');
+    if (!emailValid(email)) {
+      setError('Please enter a valid email address.');
       return;
     }
 
     setBusy(true);
     setError('');
+    setCodeSentSuccess(false);
     try {
       const targetEmail = email.trim();
-      await supabase.auth.signInWithOtp({ email: targetEmail }).catch(() => { });
+      const { error: otpErr } = await supabase.auth.signInWithOtp({ email: targetEmail });
+      if (otpErr) throw otpErr;
       setSentEmail(targetEmail);
-      setOtp('123456');
-      setVerifiedEmail(targetEmail);
+      setCodeSentSuccess(true);
       setResendIn(60);
     } catch (cause) {
-      setSentEmail(email.trim());
-      setOtp('123456');
-      setVerifiedEmail(email.trim());
+      setError(cause instanceof Error ? cause.message : 'Could not send verification code to email.');
     } finally {
       setBusy(false);
     }
@@ -127,21 +124,23 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   async function verifyCodeWithToken(tokenToVerify?: string) {
     const token = tokenToVerify !== undefined ? tokenToVerify : otp;
     const targetEmail = sentEmail || email.trim();
-    if (busy || !emailValid(targetEmail) || targetEmail.length === 0) {
+    if (busy || !emailValid(targetEmail)) {
       setError('Please enter a valid email address first.');
+      return;
+    }
+    if (!token || token.length < 6) {
+      setError('Please enter the 6-digit code sent to your email.');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      await supabase.auth.verifyOtp({ email: targetEmail, token: token || '123456', type: 'email' }).catch(() => { });
-      setSentEmail(targetEmail);
+      const { error: verifyErr } = await supabase.auth.verifyOtp({ email: targetEmail, token, type: 'email' });
+      if (verifyErr) throw verifyErr;
       setVerifiedEmail(targetEmail);
-      setOtp(token || '123456');
+      setSentEmail(targetEmail);
     } catch (cause) {
-      setSentEmail(targetEmail);
-      setVerifiedEmail(targetEmail);
-      setOtp(token || '123456');
+      setError(cause instanceof Error ? cause.message : 'Invalid verification code.');
     } finally {
       setBusy(false);
     }
@@ -150,12 +149,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const handleOtpChange = (val: string) => {
     setOtp(val);
     setError('');
-    if (val === DEMO_OTP || val === '123456' || val.length === OTP_LENGTH) {
+    if (val.length === OTP_LENGTH) {
       void verifyCodeWithToken(val);
     }
   };
 
-  async function complete() {
+  async function createAccount() {
     if (busy) return;
     if (name.trim().length <= 2) {
       setError('Please enter your full name (at least 3 characters).');
@@ -165,16 +164,20 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       setError('Please enter a valid 13-digit CNIC number.');
       return;
     }
-    if (!emailValid(email) || email.trim().length === 0) {
+    if (!emailValid(email)) {
       setError('Please enter a valid email address.');
       return;
     }
-    if (password && !passwordValid) {
+    if (!isEmailVerified) {
+      setError('Please verify your email code first before completing registration.');
+      return;
+    }
+    if (!passwordValid) {
       setError('Please enter a password with at least 6 characters.');
       return;
     }
-    if (password && !passwordMatched) {
-      setError('Passwords do not match. Please re-enter matching passwords.');
+    if (!passwordMatched) {
+      setError('Passwords do not match.');
       return;
     }
     if (!agreed) {
@@ -188,12 +191,17 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       if (password) {
         await supabase.auth.updateUser({ password }).catch(() => { });
       }
+      const cleanPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
+      const formattedPhone = cleanPhone ? `+92${cleanPhone}` : null;
+
       const { error: saveError } = await supabase.rpc('complete_reporter_registration', {
         p_name: name.trim(),
         p_cnic: cnic,
-        p_email: email.trim() || null,
+        p_email: email.trim(),
         p_vehicle_plate: vehicle.trim() || null,
+        p_phone: formattedPhone,
       });
+
       if (saveError) {
         console.log('Supabase RPC registration note:', saveError.message);
       }
@@ -207,7 +215,41 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     }
   }
 
-  const readyToCreate = name.trim().length > 2 && cnicValid(cnic) && emailValid(email) && email.length > 0 && agreed && (!password || passwordMatched);
+  async function handleLogin() {
+    if (busy) return;
+    if (!emailValid(loginEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!loginPassword) {
+      setError('Please enter your password.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      const { error: loginErr } = await supabase.auth.signInWithPassword({
+        email: loginEmail.trim(),
+        password: loginPassword,
+      });
+      if (loginErr) throw loginErr;
+      await refreshProfile().catch(() => { });
+      onComplete();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Invalid email or password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const readyToCreate =
+    name.trim().length > 2 &&
+    cnicValid(cnic) &&
+    emailValid(email) &&
+    isEmailVerified &&
+    passwordMatched &&
+    agreed;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -220,9 +262,25 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           </View>
           <Text style={styles.title}>RoadWatch</Text>
           <Text style={styles.subtitle}>Report traffic violations. Help make roads safer.</Text>
-          <Text style={styles.description}>
-            Three quick steps to register, verify your email, and set your password.
-          </Text>
+        </View>
+
+        {/* Auth Mode Switcher Tabs */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tabButton, mode === 'signup' && styles.tabButtonActive]}
+            onPress={() => { setMode('signup'); setError(''); }}
+          >
+            <UserPlus size={16} color={mode === 'signup' ? Colors.canvas : Colors.muted} style={{ marginRight: 6 }} />
+            <Text style={[styles.tabText, mode === 'signup' && styles.tabTextActive]}>Create Account</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, mode === 'signin' && styles.tabButtonActive]}
+            onPress={() => { setMode('signin'); setError(''); }}
+          >
+            <LogIn size={16} color={mode === 'signin' ? Colors.canvas : Colors.muted} style={{ marginRight: 6 }} />
+            <Text style={[styles.tabText, mode === 'signin' && styles.tabTextActive]}>Sign In</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Global Error Banner */}
@@ -233,254 +291,294 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           </View>
         )}
 
-        {/* Step 1: Identity & Email Verification */}
-        <View style={styles.stepCard}>
-          <View style={styles.stepHeader}>
-            <View style={[styles.stepBadge, isEmailVerified && styles.stepBadgeDone]}>
-              {isEmailVerified ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>1</Text>}
-            </View>
-            <Text style={styles.stepTitle}>Identity & Email Verification</Text>
-          </View>
+        {mode === 'signin' ? (
+          /* Sign In Screen */
+          <View style={styles.stepCard}>
+            <Text style={styles.stepTitle}>Sign In to RoadWatch</Text>
+            <Text style={styles.hintText}>Enter your email and password to log in.</Text>
 
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Full name</Text>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={(v) => { setName(v); setError(''); }}
-              placeholder="As printed on your CNIC"
-              placeholderTextColor="#6b7280"
-            />
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>CNIC number</Text>
-            <View style={styles.inputWrapper}>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Email Address</Text>
               <TextInput
-                style={[styles.input, cnicValid(cnic) && styles.inputValid]}
-                value={cnic}
-                onChangeText={(val) => { setCnic(formatCnic(val)); setError(''); }}
-                placeholder="XXXXX-XXXXXXX-X"
-                placeholderTextColor="#6b7280"
-                keyboardType="numeric"
-              />
-              {cnicValid(cnic) && (
-                <View style={styles.inputIconRight}>
-                  <Check size={18} color={colors.valid} />
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* Phone Number Field */}
-          <View style={styles.fieldGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Phone number</Text>
-            </View>
-            <View style={styles.phoneWrapper}>
-              <Text style={styles.countryCode}>+92</Text>
-              <TextInput
-                style={styles.phoneInput}
-                value={phone}
-                onChangeText={(val) => {
-                  setPhone(formatPakPhone(val));
-                  setError('');
-                }}
-                placeholder="0300 1234567 or 300 1234567"
-                placeholderTextColor="#6b7280"
-                keyboardType="phone-pad"
-              />
-            </View>
-          </View>
-
-          {/* Email Address Field for Verification */}
-          <View style={styles.fieldGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Email address</Text>
-              {isEmailVerified && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Check size={14} color={colors.valid} />
-                  <Text style={{ fontSize: 11, color: colors.valid, fontWeight: '700' }}>Verified ✓</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={[styles.input, isEmailVerified && styles.inputValid]}
-                value={email}
-                onChangeText={(val) => {
-                  setEmail(val);
-                  setVerifiedEmail('');
-                  setSentEmail('');
-                  setError('');
-                }}
+                style={styles.input}
+                value={loginEmail}
+                onChangeText={(v) => { setLoginEmail(v); setError(''); }}
                 placeholder="you@example.com"
                 placeholderTextColor="#6b7280"
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
-              {isEmailVerified && (
-                <View style={styles.inputIconRight}>
-                  <Check size={18} color={colors.valid} />
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* 6-Digit Demo Email Verification Box */}
-          <View style={styles.verificationBox}>
-            <Text style={styles.hintText}>
-              Demo Mode: Verification code is <Text style={styles.boldText}>123456</Text>
-            </Text>
-
-            <View style={styles.otpContainer}>
-              <OtpInput length={OTP_LENGTH} value={otp} onChange={handleOtpChange} />
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-              <TouchableOpacity
-                style={[styles.verifyButton, (busy || isEmailVerified) && styles.buttonDisabled]}
-                disabled={busy}
-                onPress={() => verifyCodeWithToken()}
-              >
-                <Text style={styles.verifyButtonText}>{isEmailVerified ? 'Email verified ✓' : 'Confirm code'}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.verifyButton, { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.edge }]}
-                disabled={busy}
-                onPress={sendCode}
-              >
-                <Text style={[styles.verifyButtonText, { color: Colors.ink }]}>Send code</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-        {/* Step 2: Account Details & Password */}
-        <View style={styles.stepCard}>
-          <View style={styles.stepHeader}>
-            <View style={[styles.stepBadge, identityDone && styles.stepBadgeDone]}>
-              {identityDone ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>2</Text>}
-            </View>
-            <Text style={styles.stepTitle}>Account Details & Password</Text>
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Email</Text>
-              <Text style={styles.optionalText}>Optional</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={(v) => { setEmail(v); setError(''); }}
-              placeholder="you@example.com"
-              placeholderTextColor="#6b7280"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Vehicle plate number</Text>
-              <Text style={styles.optionalText}>Optional</Text>
-            </View>
-            <TextInput
-              style={[styles.input, styles.plateInput]}
-              value={vehicle}
-              onChangeText={(val) => setVehicle(val.toUpperCase())}
-              placeholder="e.g. LEA-4471"
-              placeholderTextColor="#6b7280"
-              autoCapitalize="characters"
-            />
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Account Password</Text>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={[styles.input, passwordValid && styles.inputValid]}
-                value={password}
-                onChangeText={(v) => { setPassword(v); setError(''); }}
-                placeholder="At least 6 characters"
-                placeholderTextColor="#6b7280"
-                secureTextEntry={!showPassword}
-              />
-              <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowPassword(!showPassword)}>
-                {showPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Confirm Password</Text>
-              {passwordMatched && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Check size={14} color={colors.valid} />
-                  <Text style={{ fontSize: 11, color: colors.valid, fontWeight: '600' }}>Matched</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={[styles.input, passwordMatched && styles.inputValid]}
-                value={confirmPassword}
-                onChangeText={(v) => { setConfirmPassword(v); setError(''); }}
-                placeholder="Re-enter password"
-                placeholderTextColor="#6b7280"
-                secureTextEntry={!showConfirmPassword}
-              />
-              <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-                {showConfirmPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-        {/* Step 3: Safety */}
-        <View style={styles.stepCard}>
-          <View style={styles.stepHeader}>
-            <View style={[styles.stepBadge, agreed && styles.stepBadgeDone]}>
-              {agreed ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>3</Text>}
-            </View>
-            <Text style={styles.stepTitle}>Safety & Agreement</Text>
-          </View>
-
-          <View style={styles.safetyBox}>
-            <AlertTriangle size={24} color={colors.accent} />
-            <Text style={styles.safetyHeading}>Before you start reporting</Text>
-            {safetyPoints.map((point, index) => (
-              <View key={index} style={styles.bulletRow}>
-                <View style={styles.bulletDot} />
-                <Text style={styles.bulletText}>{point}</Text>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Password</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  value={loginPassword}
+                  onChangeText={(v) => { setLoginPassword(v); setError(''); }}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#6b7280"
+                  secureTextEntry={!showLoginPassword}
+                />
+                <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowLoginPassword(!showLoginPassword)}>
+                  {showLoginPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
+                </TouchableOpacity>
               </View>
-            ))}
+            </View>
 
             <TouchableOpacity
-              style={styles.checkboxRow}
-              onPress={() => setAgreed(!agreed)}
-              activeOpacity={0.8}
+              style={[styles.primaryButton, busy && styles.buttonDisabled]}
+              disabled={busy}
+              onPress={handleLogin}
+              activeOpacity={0.85}
             >
-              <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
-                {agreed && <Check size={14} color={colors.canvas} />}
-              </View>
-              <Text style={styles.checkboxLabel}>I understand and agree to report safely</Text>
+              <Text style={styles.primaryButtonText}>{busy ? 'Signing In…' : 'Sign In'}</Text>
             </TouchableOpacity>
+            {busy && <ActivityIndicator color={colors.telemetry} style={{ marginTop: 10 }} />}
           </View>
+        ) : (
+          /* Sign Up Screen Flow */
+          <>
+            {/* Step 1: User Profile & Details */}
+            <View style={styles.stepCard}>
+              <View style={styles.stepHeader}>
+                <View style={[styles.stepBadge, (name.trim().length > 2 && cnicValid(cnic)) && styles.stepBadgeDone]}>
+                  {(name.trim().length > 2 && cnicValid(cnic)) ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>1</Text>}
+                </View>
+                <Text style={styles.stepTitle}>Personal & Vehicle Details</Text>
+              </View>
 
-          <TouchableOpacity
-            style={[styles.primaryButton, (!readyToCreate || busy) && styles.buttonDisabled]}
-            disabled={!readyToCreate || busy}
-            onPress={complete}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.primaryButtonText}>{busy ? 'Please wait…' : 'Create Account & Start'}</Text>
-          </TouchableOpacity>
-          {busy && <ActivityIndicator color={colors.telemetry} style={{ marginTop: 10 }} />}
-        </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Full Name</Text>
+                <TextInput
+                  style={styles.input}
+                  value={name}
+                  onChangeText={(v) => { setName(v); setError(''); }}
+                  placeholder="As printed on your CNIC"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>CNIC Number</Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={[styles.input, cnicValid(cnic) && styles.inputValid]}
+                    value={cnic}
+                    onChangeText={(val) => { setCnic(formatCnic(val)); setError(''); }}
+                    placeholder="XXXXX-XXXXXXX-X"
+                    placeholderTextColor="#6b7280"
+                    keyboardType="numeric"
+                  />
+                  {cnicValid(cnic) && (
+                    <View style={styles.inputIconRight}>
+                      <Check size={18} color={colors.valid} />
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Phone Number</Text>
+                  <Text style={styles.optionalText}>Stored in Profile</Text>
+                </View>
+                <View style={styles.phoneWrapper}>
+                  <Text style={styles.countryCode}>+92</Text>
+                  <TextInput
+                    style={styles.phoneInput}
+                    value={phone}
+                    onChangeText={(val) => {
+                      setPhone(formatPakPhone(val));
+                      setError('');
+                    }}
+                    placeholder="0300 1234567"
+                    placeholderTextColor="#6b7280"
+                    keyboardType="phone-pad"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Vehicle Plate Number</Text>
+                  <Text style={styles.optionalText}>Optional</Text>
+                </View>
+                <TextInput
+                  style={[styles.input, styles.plateInput]}
+                  value={vehicle}
+                  onChangeText={(val) => setVehicle(val.toUpperCase())}
+                  placeholder="e.g. LEA-4471"
+                  placeholderTextColor="#6b7280"
+                  autoCapitalize="characters"
+                />
+              </View>
+            </View>
+
+            {/* Step 2: Email & OTP Verification */}
+            <View style={styles.stepCard}>
+              <View style={styles.stepHeader}>
+                <View style={[styles.stepBadge, isEmailVerified && styles.stepBadgeDone]}>
+                  {isEmailVerified ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>2</Text>}
+                </View>
+                <Text style={styles.stepTitle}>Email Verification</Text>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Email Address</Text>
+                  {isEmailVerified && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Check size={14} color={colors.valid} />
+                      <Text style={{ fontSize: 11, color: colors.valid, fontWeight: '700' }}>Verified ✓</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={[styles.input, isEmailVerified && styles.inputValid]}
+                    value={email}
+                    onChangeText={(val) => {
+                      setEmail(val);
+                      setVerifiedEmail('');
+                      setSentEmail('');
+                      setCodeSentSuccess(false);
+                      setError('');
+                    }}
+                    placeholder="you@example.com"
+                    placeholderTextColor="#6b7280"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                  {isEmailVerified && (
+                    <View style={styles.inputIconRight}>
+                      <Check size={18} color={colors.valid} />
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.sendCodeBtn, (busy || resendIn > 0) && styles.buttonDisabled]}
+                disabled={busy || resendIn > 0}
+                onPress={sendCode}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.sendCodeBtnText}>
+                  {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Send Code'}
+                </Text>
+              </TouchableOpacity>
+
+              {codeSentSuccess && !isEmailVerified && (
+                <Text style={styles.successHint}>Verification code sent to {sentEmail}!</Text>
+              )}
+
+              {/* Code Input & Confirm Code */}
+              <View style={styles.verificationBox}>
+                <Text style={styles.label}>Enter Verification Code</Text>
+                <View style={styles.otpContainer}>
+                  <OtpInput length={OTP_LENGTH} value={otp} onChange={handleOtpChange} />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.confirmCodeBtn, (busy || isEmailVerified) && styles.buttonDisabled]}
+                  disabled={busy || isEmailVerified}
+                  onPress={() => verifyCodeWithToken()}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.confirmCodeBtnText}>
+                    {isEmailVerified ? 'Email Verified ✓' : 'Confirm Code'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Step 3: Password & Safety Agreement */}
+            <View style={styles.stepCard}>
+              <View style={styles.stepHeader}>
+                <View style={[styles.stepBadge, passwordMatched && agreed && styles.stepBadgeDone]}>
+                  {(passwordMatched && agreed) ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>3</Text>}
+                </View>
+                <Text style={styles.stepTitle}>Set Password & Safety</Text>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Account Password</Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={[styles.input, passwordValid && styles.inputValid]}
+                    value={password}
+                    onChangeText={(v) => { setPassword(v); setError(''); }}
+                    placeholder="At least 6 characters"
+                    placeholderTextColor="#6b7280"
+                    secureTextEntry={!showPassword}
+                  />
+                  <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowPassword(!showPassword)}>
+                    {showPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Confirm Password</Text>
+                  {passwordMatched && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Check size={14} color={colors.valid} />
+                      <Text style={{ fontSize: 11, color: colors.valid, fontWeight: '600' }}>Matched</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={[styles.input, passwordMatched && styles.inputValid]}
+                    value={confirmPassword}
+                    onChangeText={(v) => { setConfirmPassword(v); setError(''); }}
+                    placeholder="Re-enter password"
+                    placeholderTextColor="#6b7280"
+                    secureTextEntry={!showConfirmPassword}
+                  />
+                  <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
+                    {showConfirmPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.safetyBox}>
+                <AlertTriangle size={20} color={colors.accent} />
+                <Text style={styles.safetyHeading}>Safety Guidelines</Text>
+                {safetyPoints.map((point, index) => (
+                  <View key={index} style={styles.bulletRow}>
+                    <View style={styles.bulletDot} />
+                    <Text style={styles.bulletText}>{point}</Text>
+                  </View>
+                ))}
+
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setAgreed(!agreed)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
+                    {agreed && <Check size={14} color={colors.canvas} />}
+                  </View>
+                  <Text style={styles.checkboxLabel}>I understand and agree to report safely</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.primaryButton, (!readyToCreate || busy) && styles.buttonDisabled]}
+                disabled={!readyToCreate || busy}
+                onPress={createAccount}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryButtonText}>{busy ? 'Creating Account…' : 'Create Account'}</Text>
+              </TouchableOpacity>
+              {busy && <ActivityIndicator color={colors.telemetry} style={{ marginTop: 10 }} />}
+            </View>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -497,36 +595,59 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginVertical: 20,
+    marginTop: 10,
+    marginBottom: 20,
   },
   iconBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 18,
     backgroundColor: 'rgba(245, 158, 11, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.3)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
     color: Colors.ink,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: Colors.ink,
+    color: Colors.muted,
     marginTop: 4,
   },
-  description: {
-    fontSize: 12,
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.edge,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  tabButtonActive: {
+    backgroundColor: Colors.accent,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: Colors.muted,
-    textAlign: 'center',
-    marginTop: 6,
-    maxWidth: 280,
+  },
+  tabTextActive: {
+    color: Colors.canvas,
+    fontWeight: 'bold',
   },
   stepCard: {
     backgroundColor: Colors.surface,
@@ -562,7 +683,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   stepTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 'bold',
     color: Colors.ink,
   },
@@ -619,8 +740,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.edge,
     borderRadius: 12,
   },
-  verifyButton: { marginTop: 8, alignSelf: 'flex-start', backgroundColor: Colors.telemetry, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 },
-  verifyButtonText: { color: Colors.canvas, fontSize: 12, fontWeight: 'bold' },
   countryCode: {
     fontSize: 14,
     fontWeight: '600',
@@ -640,48 +759,70 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     letterSpacing: 1.5,
   },
-  hintText: {
-    fontSize: 12,
-    color: Colors.muted,
-    marginBottom: 12,
+  sendCodeBtn: {
+    backgroundColor: Colors.telemetry,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
   },
-  boldText: {
-    color: Colors.ink,
+  sendCodeBtnText: {
+    color: Colors.canvas,
+    fontSize: 13,
     fontWeight: 'bold',
+  },
+  successHint: {
+    fontSize: 12,
+    color: Colors.valid,
+    fontWeight: '600',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  verificationBox: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: Colors.edge,
   },
   otpContainer: {
     marginVertical: 10,
   },
-  resendBtn: {
-    marginTop: 8,
+  confirmCodeBtn: {
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 6,
   },
-  resendText: {
+  confirmCodeBtnText: {
+    color: Colors.canvas,
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  hintText: {
     fontSize: 12,
-    color: Colors.telemetry,
-    fontWeight: '600',
-  },
-  resendDisabled: {
     color: Colors.muted,
+    marginBottom: 14,
   },
   safetyBox: {
     backgroundColor: Colors.surfaceElevated,
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.3)',
     marginBottom: 16,
   },
   safetyHeading: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
     color: Colors.ink,
-    marginTop: 8,
-    marginBottom: 10,
+    marginTop: 6,
+    marginBottom: 8,
   },
   bulletRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   bulletDot: {
     width: 6,
@@ -700,8 +841,8 @@ const styles = StyleSheet.create({
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 10,
+    paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: Colors.edge,
   },
@@ -728,22 +869,16 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: Colors.accent,
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
   },
   buttonDisabled: {
     opacity: 0.5,
   },
   primaryButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 'bold',
     color: Colors.canvas,
-  },
-  verificationBox: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: Colors.edge,
   },
   errorBanner: {
     flexDirection: 'row',
