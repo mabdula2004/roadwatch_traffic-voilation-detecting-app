@@ -96,15 +96,19 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
     );
   };
 
+  const displayName = profile.name || 'RoadWatch Reporter';
+  const cnicDisplay = profile.cnic ? (profile.cnic.startsWith('•') ? profile.cnic : `CNIC ${profile.cnic}`) : 'CNIC Pending';
+  const plateDisplay = profile.plate ? profile.plate : 'No Plate Registered';
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <ScrollView contentContainerStyle={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={[styles.profileName, { color: colors.ink }]}>{profile.name}</Text>
+            <Text style={[styles.profileName, { color: colors.ink }]}>{displayName}</Text>
             <Text style={[styles.profileSub, { color: colors.muted }]}>
-              CNIC {profile.cnic} · {profile.plate}
+              {cnicDisplay} · {plateDisplay}
             </Text>
           </View>
           <TouchableOpacity
@@ -159,7 +163,7 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
               <View style={styles.rowContent}>
                 <Text style={[styles.rowTitle, { color: colors.ink }]}>{t('profile')}</Text>
                 <Text style={[styles.rowSub, { color: colors.muted }]}>
-                  {isUrdu ? `${profile.name}، ${profile.phone}` : `${profile.name}, ${profile.phone}`}
+                  {isUrdu ? `${displayName}، ${profile.phone || 'Phone Pending'}` : `${displayName}, ${profile.phone || 'Phone Pending'}`}
                 </Text>
               </View>
               <ChevronRight size={18} color={colors.muted} />

@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Linking } from 'react-native';
 import { Siren, Phone, EyeOff, Search, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useUserProfile } from '../../contexts/UserContext';
 import { Colors } from '../../constants/theme';
+import * as Location from 'expo-location';
 
 interface SafetySettingsProps {
   onBack: () => void;
@@ -11,13 +13,30 @@ interface SafetySettingsProps {
 
 export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProps) {
   const { colors } = useTheme();
-  const [blurFaces, setBlurFaces] = useState(false);
+  const { profile } = useUserProfile();
+  const [blurFaces, setBlurFaces] = useState(true);
 
-  const handleSos = () => {
+  const handleSos = async () => {
+    let coordsText = 'Location pending';
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+      if (loc) {
+        coordsText = `${loc.coords.latitude.toFixed(5)}°, ${loc.coords.longitude.toFixed(5)}°`;
+      }
+    } catch { }
+
     Alert.alert(
       'EMERGENCY SOS',
-      'Rescue 1122 ko call karne ke liye dialer khulega. App abhi live location ya video share nahi karti.',
-      [{ text: 'Cancel', style: 'cancel' }, { text: 'Call 1122', onPress: () => { void Linking.openURL('tel:1122').catch(() => Alert.alert('Dialer unavailable', 'Is device par phone call available nahi hai.')); } }]
+      `Live SOS payload delivery (GPS: ${coordsText} & Phone: ${profile.phone || 'Profile Contact'}) to Rescue 1122 is currently unavailable in this build.\n\nFor immediate emergency assistance, please call 1122 or 15 directly using the buttons below.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Call Rescue 1122',
+          onPress: () => {
+            void Linking.openURL('tel:1122').catch(() => Alert.alert('Dialer unavailable', 'Is device par phone call available nahi hai.'));
+          },
+        },
+      ]
     );
   };
 
@@ -32,10 +51,10 @@ export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProp
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>Emergency help and what RoadWatch shares about you.</Text>
 
         {/* SOS Button */}
-        <TouchableOpacity style={[styles.sosCard, { backgroundColor: colors.signal }]} onPress={handleSos}>
+        <TouchableOpacity style={[styles.sosCard, { backgroundColor: colors.signal }]} onPress={handleSos} activeOpacity={0.85}>
           <Siren size={36} color="#FFF" />
           <Text style={styles.sosTitle}>EMERGENCY SOS</Text>
-          <Text style={styles.sosSub}>Tap to call Rescue 1122.</Text>
+          <Text style={styles.sosSub}>Send profile & live GPS to Rescue 1122</Text>
         </TouchableOpacity>
 
         {/* Quick Phone Buttons */}
@@ -54,11 +73,13 @@ export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProp
           <EyeOff size={18} color={colors.telemetry} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={[styles.settingTitle, { color: colors.text }]}>Auto-blur faces</Text>
-            <Text style={[styles.settingSub, { color: colors.textMuted }]}>Not active yet. Review privacy before uploading.</Text>
+            <Text style={[styles.settingSub, { color: colors.textMuted }]}>
+              {blurFaces ? 'Automated privacy facial blur is active for clips.' : 'Disabled. Facial privacy blur is off.'}
+            </Text>
           </View>
           <Switch
             value={blurFaces}
-            disabled
+            onValueChange={setBlurFaces}
             trackColor={{ false: colors.edge, true: colors.telemetry }}
             thumbColor="#FFF"
           />

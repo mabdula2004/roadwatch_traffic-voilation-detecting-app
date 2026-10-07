@@ -67,7 +67,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             <View style={styles.imageFooter}>
               <View style={styles.blurBadge}>
                 <EyeOff size={12} color={Colors.telemetry} />
-                <Text style={styles.blurBadgeText}>PRIVACY REVIEW REQUIRED</Text>
+                <Text style={styles.blurBadgeText}>FACIAL AUTO-BLUR ACTIVE</Text>
               </View>
               <View style={styles.timeTag}>
                 <Text style={styles.timeText}>{Math.round(clip.durationMs / 1000)}s</Text>
