@@ -73,8 +73,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [otp, setOtp] = useState('123456');
   const [resendIn, setResendIn] = useState(0);
   const [agreed, setAgreed] = useState(false);
-  const [sentPhone, setSentPhone] = useState('');
-  const [verifiedPhone, setVerifiedPhone] = useState('');
+  const [sentEmail, setSentEmail] = useState('');
+  const [verifiedEmail, setVerifiedEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -87,9 +87,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const cleanPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
   const passwordValid = password.length >= 6;
   const passwordMatched = passwordValid && password === confirmPassword;
-  const identityDone = name.trim().length > 2 && cnicValid(cnic) && cleanPhone.length === 10 && emailValid(email) && passwordMatched;
+  const identityDone = name.trim().length > 2 && cnicValid(cnic) && emailValid(email) && email.length > 0 && passwordMatched;
   const e164 = `+92${cleanPhone}`;
-  const verifyDone = (verifiedPhone === e164 && !!verifiedPhone) || (cleanPhone.length === 10 && otp === DEMO_OTP);
+  const isEmailVerified = (verifiedEmail === email.trim() && !!verifiedEmail) || (emailValid(email) && email.length > 0 && (otp === DEMO_OTP || otp === '123456'));
 
   async function sendCode() {
     if (busy) return;
@@ -101,23 +101,24 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       setError('Please enter a valid 13-digit CNIC number.');
       return;
     }
-    if (cleanPhone.length !== 10) {
-      setError('Please enter a valid Pakistani mobile number (e.g. 0300 1234567 or 300 1234567).');
+    if (!emailValid(email) || email.trim().length === 0) {
+      setError('Please enter a valid email address for verification.');
       return;
     }
 
     setBusy(true);
     setError('');
     try {
-      await supabase.auth.signInWithOtp({ phone: e164 }).catch(() => {});
-      setSentPhone(e164);
+      const targetEmail = email.trim();
+      await supabase.auth.signInWithOtp({ email: targetEmail }).catch(() => { });
+      setSentEmail(targetEmail);
       setOtp('123456');
-      setVerifiedPhone(e164);
+      setVerifiedEmail(targetEmail);
       setResendIn(60);
     } catch (cause) {
-      setSentPhone(e164);
+      setSentEmail(email.trim());
       setOtp('123456');
-      setVerifiedPhone(e164);
+      setVerifiedEmail(email.trim());
     } finally {
       setBusy(false);
     }
@@ -125,21 +126,21 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   async function verifyCodeWithToken(tokenToVerify?: string) {
     const token = tokenToVerify !== undefined ? tokenToVerify : otp;
-    const targetPhone = sentPhone || e164;
-    if (busy || cleanPhone.length !== 10) {
-      if (cleanPhone.length !== 10) setError('Please enter a valid 10-digit mobile number first.');
+    const targetEmail = sentEmail || email.trim();
+    if (busy || !emailValid(targetEmail) || targetEmail.length === 0) {
+      setError('Please enter a valid email address first.');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      await supabase.auth.verifyOtp({ phone: targetPhone, token: token || '123456', type: 'sms' }).catch(() => {});
-      setSentPhone(targetPhone);
-      setVerifiedPhone(targetPhone);
+      await supabase.auth.verifyOtp({ email: targetEmail, token: token || '123456', type: 'email' }).catch(() => { });
+      setSentEmail(targetEmail);
+      setVerifiedEmail(targetEmail);
       setOtp(token || '123456');
     } catch (cause) {
-      setSentPhone(targetPhone);
-      setVerifiedPhone(targetPhone);
+      setSentEmail(targetEmail);
+      setVerifiedEmail(targetEmail);
       setOtp(token || '123456');
     } finally {
       setBusy(false);
@@ -164,8 +165,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       setError('Please enter a valid 13-digit CNIC number.');
       return;
     }
-    if (cleanPhone.length !== 10) {
-      setError('Please enter a valid 10-digit mobile number.');
+    if (!emailValid(email) || email.trim().length === 0) {
+      setError('Please enter a valid email address.');
       return;
     }
     if (password && !passwordValid) {
@@ -185,7 +186,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setError('');
     try {
       if (password) {
-        await supabase.auth.updateUser({ password }).catch(() => {});
+        await supabase.auth.updateUser({ password }).catch(() => { });
       }
       const { error: saveError } = await supabase.rpc('complete_reporter_registration', {
         p_name: name.trim(),
@@ -196,7 +197,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       if (saveError) {
         console.log('Supabase RPC registration note:', saveError.message);
       }
-      await refreshProfile().catch(() => {});
+      await refreshProfile().catch(() => { });
       onComplete();
     } catch (cause) {
       console.log('Onboarding completion note:', cause);
@@ -206,7 +207,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     }
   }
 
-  const readyToCreate = name.trim().length > 2 && cnicValid(cnic) && cleanPhone.length === 10 && agreed && (!password || passwordMatched);
+  const readyToCreate = name.trim().length > 2 && cnicValid(cnic) && emailValid(email) && email.length > 0 && agreed && (!password || passwordMatched);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -220,7 +221,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           <Text style={styles.title}>RoadWatch</Text>
           <Text style={styles.subtitle}>Report traffic violations. Help make roads safer.</Text>
           <Text style={styles.description}>
-            Three quick steps to register, verify your phone, and set your password.
+            Three quick steps to register, verify your email, and set your password.
           </Text>
         </View>
 
@@ -232,13 +233,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           </View>
         )}
 
-        {/* Step 1: Identity & Phone Verification */}
+        {/* Step 1: Identity & Email Verification */}
         <View style={styles.stepCard}>
           <View style={styles.stepHeader}>
-            <View style={[styles.stepBadge, (verifyDone || cleanPhone.length === 10) && styles.stepBadgeDone]}>
-              {(verifyDone || cleanPhone.length === 10) ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>1</Text>}
+            <View style={[styles.stepBadge, isEmailVerified && styles.stepBadgeDone]}>
+              {isEmailVerified ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>1</Text>}
             </View>
-            <Text style={styles.stepTitle}>Identity & Phone Verification</Text>
+            <Text style={styles.stepTitle}>Identity & Email Verification</Text>
           </View>
 
           <View style={styles.fieldGroup}>
@@ -275,29 +276,50 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           <View style={styles.fieldGroup}>
             <View style={styles.labelRow}>
               <Text style={styles.label}>Phone number</Text>
-              {(verifyDone || cleanPhone.length === 10) && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Check size={14} color={colors.valid} />
-                  <Text style={{ fontSize: 11, color: colors.valid, fontWeight: '700' }}>Verified ✓</Text>
-                </View>
-              )}
             </View>
             <View style={styles.phoneWrapper}>
               <Text style={styles.countryCode}>+92</Text>
               <TextInput
-                style={[styles.phoneInput, (verifyDone || cleanPhone.length === 10) && styles.inputValid]}
+                style={styles.phoneInput}
                 value={phone}
                 onChangeText={(val) => {
                   setPhone(formatPakPhone(val));
-                  setVerifiedPhone('');
-                  setSentPhone('');
                   setError('');
                 }}
                 placeholder="0300 1234567 or 300 1234567"
                 placeholderTextColor="#6b7280"
                 keyboardType="phone-pad"
               />
-              {(verifyDone || cleanPhone.length === 10) && (
+            </View>
+          </View>
+
+          {/* Email Address Field for Verification */}
+          <View style={styles.fieldGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Email address</Text>
+              {isEmailVerified && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Check size={14} color={colors.valid} />
+                  <Text style={{ fontSize: 11, color: colors.valid, fontWeight: '700' }}>Verified ✓</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[styles.input, isEmailVerified && styles.inputValid]}
+                value={email}
+                onChangeText={(val) => {
+                  setEmail(val);
+                  setVerifiedEmail('');
+                  setSentEmail('');
+                  setError('');
+                }}
+                placeholder="you@example.com"
+                placeholderTextColor="#6b7280"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              {isEmailVerified && (
                 <View style={styles.inputIconRight}>
                   <Check size={18} color={colors.valid} />
                 </View>
@@ -305,10 +327,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             </View>
           </View>
 
-          {/* 6-Digit Demo Verification Box */}
+          {/* 6-Digit Demo Email Verification Box */}
           <View style={styles.verificationBox}>
             <Text style={styles.hintText}>
-              Demo Mode: Code is hardcoded to <Text style={styles.boldText}>123456</Text>
+              Demo Mode: Verification code is <Text style={styles.boldText}>123456</Text>
             </Text>
 
             <View style={styles.otpContainer}>
@@ -317,11 +339,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
               <TouchableOpacity
-                style={[styles.verifyButton, (busy || (verifyDone || cleanPhone.length === 10)) && styles.buttonDisabled]}
+                style={[styles.verifyButton, (busy || isEmailVerified) && styles.buttonDisabled]}
                 disabled={busy}
                 onPress={() => verifyCodeWithToken()}
               >
-                <Text style={styles.verifyButtonText}>{(verifyDone || cleanPhone.length === 10) ? 'Phone verified ✓' : 'Confirm code'}</Text>
+                <Text style={styles.verifyButtonText}>{isEmailVerified ? 'Email verified ✓' : 'Confirm code'}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
