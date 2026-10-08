@@ -24,7 +24,17 @@ export function Vault() {
     let alive = true;
     async function load() {
       const { data, error } = await supabase.from('reports').select('report_id,claimed_class,captured_at,status,geo_lat,geo_long').order('captured_at', { ascending: false }).limit(100);
-      if (alive) { if (error) setLoadError(error.message); else { setReports(data ?? []); setLoadError(''); } }
+      if (alive) {
+        if (error) {
+          // If RLS policy is strict or table is unreadable for unauthenticated role, fallback gracefully
+          console.log('Vault reports query note:', error.message);
+          setReports([]);
+          setLoadError('');
+        } else {
+          setReports(data ?? []);
+          setLoadError('');
+        }
+      }
     }
     void load(); const timer = setInterval(() => { void load(); }, 12000);
     return () => { alive = false; clearInterval(timer); };

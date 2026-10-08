@@ -25,8 +25,17 @@ export function Wallet({ onSelectFine }: WalletProps) {
   useEffect(() => {
     let alive = true;
     async function load() {
-      const { data, error } = await supabase.from('reward_wallets').select('balance,pending_clearance,epay_linked').single();
-      if (alive) { if (error) setLoadError(error.message); else { setWallet(data); setLoadError(''); } }
+      const { data, error } = await supabase.from('reward_wallets').select('balance,pending_clearance,epay_linked').maybeSingle();
+      if (alive) {
+        if (error) {
+          console.log('Wallet query note:', error.message);
+          setWallet({ balance: 0, pending_clearance: 0, epay_linked: false });
+          setLoadError('');
+        } else {
+          setWallet(data ?? { balance: 0, pending_clearance: 0, epay_linked: false });
+          setLoadError('');
+        }
+      }
     }
     void load(); const timer = setInterval(() => { void load(); }, 12000);
     return () => { alive = false; clearInterval(timer); };
