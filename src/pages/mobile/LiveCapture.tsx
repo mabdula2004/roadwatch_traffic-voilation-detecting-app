@@ -74,10 +74,31 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
       const capturedAt = new Date().toISOString();
       const startMs = Date.now();
       setPreparing(false); setRecording(true);
-      const result = await camera.current.recordAsync({ maxDuration: 10, maxFileSize: 50 * 1024 * 1024 });
-      if (result?.uri) onCapture({ clientCaptureId: Crypto.randomUUID(), uri: result.uri, capturedAt, latitude, longitude, accuracy, durationMs: Date.now() - startMs });
+      const result = await camera.current.recordAsync({ maxDuration: 30, maxFileSize: 50 * 1024 * 1024 });
+      const durationMs = Date.now() - startMs;
+      if (durationMs < 10000) {
+        Alert.alert(
+          'Video Too Short (< 10s)',
+          'Evidence recording must be at least 10 seconds long for legal verification. Please record again.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      if (result?.uri) onCapture({ clientCaptureId: Crypto.randomUUID(), uri: result.uri, capturedAt, latitude, longitude, accuracy, durationMs });
     } catch (cause) { Alert.alert('Capture unavailable', cause instanceof Error ? cause.message : 'Video record nahi ho saka.'); }
     finally { recordingNow.current = false; setRecording(false); setPreparing(false); }
+  }
+
+  function handleStop() {
+    if (recordingDurationSec < 10) {
+      Alert.alert(
+        'Minimum 10 Seconds Required',
+        `Evidence requires at least 10 seconds of continuous footage (currently ${recordingDurationSec}s). Please wait ${10 - recordingDurationSec} more second(s) before stopping.`,
+        [{ text: 'Keep Recording' }]
+      );
+      return;
+    }
+    camera.current?.stopRecording();
   }
 
   return (
@@ -90,10 +111,12 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
         <View style={styles.hudTop}>
           <View style={styles.topHeaderRow}>
             {recording && (
-              <View style={styles.recBadge}>
-                <View style={styles.recDot} />
-                <Text style={styles.recText}>REC {formatDuration(recordingDurationSec)}</Text>
-                <Text style={styles.recMaxText}>/ 00:10</Text>
+              <View style={[styles.recBadge, recordingDurationSec >= 10 ? { borderColor: Colors.valid } : {}]}>
+                <View style={[styles.recDot, recordingDurationSec >= 10 ? { backgroundColor: Colors.valid } : {}]} />
+                <Text style={[styles.recText, recordingDurationSec >= 10 ? { color: Colors.valid } : {}]}>
+                  REC {formatDuration(recordingDurationSec)}
+                </Text>
+                <Text style={styles.recMaxText}>/ 00:30 (Min 10s)</Text>
               </View>
             )}
             <View style={styles.timeBadge}>
@@ -122,15 +145,17 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
             </View>
           </View>
           <View style={[styles.scanBadge, recording && styles.scanBadgeRecording]}>
-            <Scan size={14} color={recording ? Colors.signal : Colors.telemetry} />
+            <Scan size={14} color={recording ? (recordingDurationSec >= 10 ? Colors.valid : Colors.signal) : Colors.telemetry} />
             <Text style={[styles.scanText, recording && styles.scanTextRecording]}>
               {!permission?.granted
                 ? 'TAP BELOW TO ALLOW CAMERA'
                 : recording
-                ? `RECORDING (${formatDuration(recordingDurationSec)}) · TAP TO STOP`
+                ? recordingDurationSec < 10
+                  ? `RECORDING (${recordingDurationSec}s) · MIN 10s REQUIRED`
+                  : `RECORDING (${recordingDurationSec}s) · TAP TO STOP (MAX 30s)`
                 : preparing
                 ? 'GETTING GPS'
-                : 'READY TO RECORD · STOP SAFELY'}
+                : 'READY TO RECORD (10s – 30s)'}
             </Text>
           </View>
         </View>
@@ -139,7 +164,7 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
         <View style={styles.controlsRow}>
           <TouchableOpacity
             style={[styles.shutterButton, recording && styles.shutterButtonRecording]}
-            onPress={recording ? () => camera.current?.stopRecording() : start}
+            onPress={recording ? handleStop : start}
             disabled={preparing}
             activeOpacity={0.8}
           >

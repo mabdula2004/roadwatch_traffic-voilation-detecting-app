@@ -32,6 +32,7 @@ export interface AiEvidentiaryResult {
   reasoning: string;
   notes: string;
   analyzedAt: string;
+  isRateLimited?: boolean;
 }
 
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
@@ -50,13 +51,13 @@ export async function analyzeTrafficViolation(params: {
 }): Promise<AiEvidentiaryResult> {
   const caseId = `CASE-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  const prompt = `You are RoadWatch AI powered by Qwen2.5-VL-72B Instruct, a strict traffic-violation enforcement system.
-Review the following reported traffic recording in Pakistan:
+  const prompt = `You are RoadWatch AI powered by Qwen2.5-VL-72B Instruct, a strict traffic-violation enforcement vision system.
+Review the recorded traffic incident evidence:
 - Location GPS: ${params.latitude}, ${params.longitude}
 - Timestamp: ${params.capturedAt}
-- Reporter Inspection Mode: ${params.claimedClass === 'auto_ai_detect' ? 'Autonomous Scan (All 20 Rules)' : `Specific Focus on ${params.claimedClass}`}
+- Inspection Target: ${params.claimedClass === 'auto_ai_detect' ? 'Autonomous Scan (All 20 Rules)' : `Check for ${params.claimedClass}`}
 
-Applicable Traffic Rules Taxonomy:
+Traffic Violation Taxonomy:
 ${VIOLATION_LIST_PROMPT}
 
 STRICT EVIDENTIARY RULES:
@@ -66,79 +67,104 @@ STRICT EVIDENTIARY RULES:
 
 2. NUMBER PLATE READABILITY:
    - "clear" | "blurred" | "too_far" | "obscured" | "missing" | "glare_or_dark"
-   - If blurred/obscured, NEVER hallucinate plate characters! Set plate_number to null, plate_confidence to 0.0, and rejection_reason to "plate_blurred".
-   - If physically missing from vehicle, set plate_status to "missing" and violation_type to "no_plate".
+   - NEVER guess or hallucinate plate characters! If unreadable, set plate_number to null, plate_confidence to 0.0, and rejection_reason to "plate_blurred".
+   - If missing from vehicle, set plate_status to "missing" and violation_type to "no_plate".
 
 3. CLARITY SCORE:
-   - Score between 0.0 and 1.0. If under 0.5, set rejection_reason to "low_clarity" and violation_detected to false.
+   - 0.0 to 1.0. If under 0.5, set rejection_reason to "low_clarity" and violation_detected to false.
 
 4. EXEMPTION:
-   - Emergency vehicle (ambulance, police, fire) -> set rejection_reason to "emergency_exemption" and violation_detected to false.
+   - Emergency responder (ambulance, police, fire) -> set rejection_reason to "emergency_exemption" and violation_detected to false.
 
-Respond ONLY with a single JSON object in this exact schema (no markdown formatting, no code blocks):
+Respond ONLY with a single JSON object (no markdown, no backticks):
 {
-  "violation_detected": true,
-  "violation_type": "red_light_running",
+  "violation_detected": false,
+  "violation_type": null,
   "vehicle_distance": "optimal",
   "plate_status": "clear",
-  "plate_number": "LEA-4471",
-  "plate_confidence": 0.94,
-  "clarity_score": 0.91,
-  "vehicle_make_model": "Toyota Corolla",
-  "vehicle_color": "White",
-  "vehicle_type": "Sedan",
-  "rejection_reason": "none",
-  "reasoning": "Vehicle crossed stop line during active red light. Registration plate LEA-4471 is sharp and fully legible."
+  "plate_number": null,
+  "plate_confidence": 0.0,
+  "clarity_score": 0.85,
+  "vehicle_make_model": "Unknown",
+  "vehicle_color": "Unknown",
+  "vehicle_type": "Unknown",
+  "rejection_reason": "no_violation",
+  "reasoning": "No violation observed in recording."
 }`;
 
-  try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'HTTP-Referer': 'https://roadwatch.app',
-        'X-OpenRouter-Title': 'RoadWatch Traffic AI',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        max_tokens: 400,
-      }),
-    });
+  // Call OpenRouter with multi-model fallback to bypass 429 rate limit
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'HTTP-Referer': 'https://roadwatch.app',
+          'X-OpenRouter-Title': 'RoadWatch Traffic AI',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          models: [
+            AI_MODEL,
+            'qwen/qwen3-vl-32b-instruct',
+            'qwen/qwen3-vl-30b-a3b-instruct',
+          ],
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          max_tokens: 350,
+        }),
+      });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`OpenRouter HTTP ${response.status}: ${errText}`);
+      if (!response.ok) {
+        const errText = await response.text();
+        if (response.status === 429 && attempt === 0) {
+          // Wait 1.5 seconds and retry once
+          await new Promise(res => setTimeout(res, 1500));
+          continue;
+        }
+        throw new Error(`OpenRouter HTTP ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      const rawContent = data.choices?.[0]?.message?.content || '';
+      const cleaned = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+
+      return formatResult(caseId, parsed, params.claimedClass);
+    } catch (err: any) {
+      if (attempt === 0 && String(err).includes('429')) {
+        await new Promise(res => setTimeout(res, 1500));
+        continue;
+      }
+      console.log('Qwen AI API notice:', err);
     }
-
-    const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content || '';
-    const cleaned = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-
-    return formatResult(caseId, parsed, params.claimedClass);
-  } catch (err) {
-    console.log('Qwen AI API fallback note:', err);
-    // Reliable evidentiary evaluation if network drops
-    const fallbackViolation = params.claimedClass !== 'auto_ai_detect' ? params.claimedClass : 'red_light_running';
-    const fallbackParsed = {
-      violation_detected: true,
-      violation_type: fallbackViolation,
-      vehicle_distance: 'optimal',
-      plate_status: 'clear',
-      plate_number: 'LEA-4471',
-      plate_confidence: 0.94,
-      clarity_score: 0.92,
-      vehicle_make_model: 'Toyota Corolla Altis',
-      vehicle_color: 'White',
-      vehicle_type: 'Sedan',
-      rejection_reason: 'none',
-      reasoning: `Visual telemetry confirmed ${fallbackViolation.replace(/_/g, ' ')}. Number plate LEA-4471 validated under legal evidentiary standards.`,
-    };
-    return formatResult(caseId, fallbackParsed, params.claimedClass);
   }
+
+  // When AI is rate limited or congested, DO NOT RETURN FAKE PLATES OR CARS!
+  // Return honest rate-limit state so user can retry or submit cleanly
+  return {
+    caseId,
+    violationDetected: false,
+    violationType: null,
+    violationName: 'Pending Real AI Verification',
+    vehicleDistance: 'optimal',
+    plateStatus: 'blurred',
+    plateNumber: null,
+    plateConfidence: 0,
+    clarityScore: 0,
+    rejectionReason: 'none',
+    vehicleMakeModel: 'Not Detected',
+    vehicleColor: 'Unknown',
+    vehicleType: 'Unknown',
+    fineAmountPkr: 0,
+    status: 'no_violation',
+    statusLabel: 'AI Service Rate Limited (429)',
+    reasoning: 'Qwen 2.5-VL shared pool is temporarily rate-limited. Tap "Retry AI Analysis" below.',
+    notes: 'Upstream rate limit (429). No false citation was created.',
+    analyzedAt: new Date().toISOString(),
+    isRateLimited: true,
+  };
 }
 
 function formatResult(caseId: string, parsed: any, claimedClass: string): AiEvidentiaryResult {
@@ -146,7 +172,7 @@ function formatResult(caseId: string, parsed: any, claimedClass: string): AiEvid
   const plateStatus: PlateStatus = parsed.plate_status || 'clear';
   const vehicleDistance: VehicleDistance = parsed.vehicle_distance || 'optimal';
   const clarityScore = Math.round(Number(parsed.clarity_score ?? 0.88) * 100);
-  const plateConfidence = Math.round(Number(parsed.plate_confidence ?? 0.92) * 100);
+  const plateConfidence = Math.round(Number(parsed.plate_confidence ?? 0.0) * 100);
   let rejectionReason: RejectionReason = parsed.rejection_reason || 'none';
 
   // Apply evidentiary rules hierarchy
@@ -174,16 +200,13 @@ function formatResult(caseId: string, parsed: any, claimedClass: string): AiEvid
     rejectionReason = 'no_violation';
   }
 
-  const detectedViolationCode = status === 'fined'
-    ? (parsed.violation_type || (claimedClass !== 'auto_ai_detect' ? claimedClass : 'red_light_running'))
-    : null;
-
+  const detectedViolationCode = status === 'fined' ? parsed.violation_type : null;
   const violationMeta = getViolationMeta(detectedViolationCode);
   const fineAmountPkr = status === 'fined' && detectedViolationCode ? (FINE_SCHEDULE[detectedViolationCode] || 2000) : 0;
 
-  const plateNumber = (status === 'rejected_plate_blurred' || status === 'rejected_vehicle_too_far')
+  const plateNumber = (status === 'rejected_plate_blurred' || status === 'rejected_vehicle_too_far' || !parsed.plate_number)
     ? null
-    : (parsed.plate_number || 'LEA-4471');
+    : parsed.plate_number;
 
   return {
     caseId,
@@ -196,16 +219,16 @@ function formatResult(caseId: string, parsed: any, claimedClass: string): AiEvid
     plateConfidence: plateNumber ? plateConfidence : 0,
     clarityScore,
     rejectionReason,
-    vehicleMakeModel: parsed.vehicle_make_model || 'Toyota Corolla Sedan',
-    vehicleColor: parsed.vehicle_color || 'White',
-    vehicleType: parsed.vehicle_type || 'Sedan',
+    vehicleMakeModel: parsed.vehicle_make_model || 'Not Identified',
+    vehicleColor: parsed.vehicle_color || 'Unknown',
+    vehicleType: parsed.vehicle_type || 'Unknown',
     fineAmountPkr,
     status,
     statusLabel,
-    reasoning: parsed.reasoning || 'Evidence processed according to traffic enforcement standards.',
+    reasoning: parsed.reasoning || (status === 'fined' ? 'Violation detected in footage.' : 'No traffic violation confirmed.'),
     notes: status === 'fined'
       ? 'Automated citation recorded. Evidence sealed into citizen Private Vault.'
-      : 'Report rejected due to evidentiary threshold failure. No fine issued to driver.',
+      : 'Report verified. No citation issued.',
     analyzedAt: new Date().toISOString(),
   };
 }

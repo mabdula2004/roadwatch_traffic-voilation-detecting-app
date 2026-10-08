@@ -1,7 +1,7 @@
 import { useTheme } from '../../contexts/ThemeContext';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { ChevronLeft, EyeOff, Fingerprint, Lock, Play, Download, Car, ScanLine, MapPin } from 'lucide-react-native';
+import { ChevronLeft, EyeOff, Fingerprint, Lock, Play, Download, Car, ScanLine, MapPin, RefreshCw } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { File } from 'expo-file-system';
@@ -36,43 +36,48 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const player = useVideoPlayer(clip.uri);
   const file = new File(clip.uri);
 
+  const runAi = React.useCallback(async () => {
+    setAnalyzingAi(true);
+    try {
+      const result = await analyzeTrafficViolation({
+        claimedClass,
+        capturedAt: clip.capturedAt,
+        latitude: clip.latitude,
+        longitude: clip.longitude,
+      });
+      setAiResult(result);
+    } catch (err) {
+      console.log('AI run note:', err);
+    } finally {
+      setAnalyzingAi(false);
+    }
+  }, [claimedClass, clip]);
+
   // Trigger Qwen AI analysis on mount / violation claim change
   React.useEffect(() => {
-    let active = true;
-    async function runAi() {
-      setAnalyzingAi(true);
-      try {
-        const result = await analyzeTrafficViolation({
-          claimedClass,
-          capturedAt: clip.capturedAt,
-          latitude: clip.latitude,
-          longitude: clip.longitude,
-        });
-        if (active) setAiResult(result);
-      } catch (err) {
-        console.log('AI run note:', err);
-      } finally {
-        if (active) setAnalyzingAi(false);
-      }
-    }
     void runAi();
-    return () => { active = false; };
-  }, [claimedClass]);
+  }, [runAi]);
 
   const aiRows = [
     {
       label: 'Detected plate',
       value: analyzingAi
-        ? 'Qwen analyzing…'
-        : (aiResult?.plateNumber ? `${aiResult.plateNumber} (${aiResult.plateConfidence}% conf)` : (aiResult?.plateStatus ? `Plate ${aiResult.plateStatus}` : 'LEA-4471')),
+        ? 'Scanning footage…'
+        : (aiResult?.plateNumber
+          ? `${aiResult.plateNumber} (${aiResult.plateConfidence}% conf)`
+          : (aiResult?.plateStatus === 'missing'
+            ? 'No Plate On Vehicle'
+            : (aiResult?.plateStatus ? `Plate ${aiResult.plateStatus}` : 'Not Detected'))),
       Icon: ScanLine,
       isTelemetry: true,
     },
     {
       label: 'Vehicle match',
       value: analyzingAi
-        ? 'Qwen analyzing…'
-        : `${aiResult?.vehicleColor || 'White'} ${aiResult?.vehicleMakeModel || 'Toyota Corolla'}`,
+        ? 'Analyzing make/model…'
+        : (aiResult?.vehicleMakeModel && aiResult.vehicleMakeModel !== 'Unknown' && aiResult.vehicleMakeModel !== 'Not Detected' && aiResult.vehicleMakeModel !== 'Not Identified'
+          ? `${aiResult.vehicleColor} ${aiResult.vehicleMakeModel}`
+          : 'Not Identified'),
       Icon: Car,
       isTelemetry: true,
     },
@@ -85,14 +90,15 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
     {
       label: 'Clarity & Distance',
       value: analyzingAi
-        ? '…'
-        : `${aiResult?.clarityScore ?? 90}% · ${aiResult?.vehicleDistance || 'optimal'}`,
+        ? 'Checking clarity…'
+        : (aiResult?.isRateLimited ? 'Rate-limited (Tap Retry)' : `${aiResult?.clarityScore ?? 0}% · ${aiResult?.vehicleDistance || 'optimal'}`),
       Icon: EyeOff,
       isTelemetry: true,
     },
   ];
 
   async function handleSubmit() {
+    if (analyzingAi) return;
     setSubmitting(true);
     setError('');
     try {
@@ -204,6 +210,32 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             </View>
           )}
 
+          {/* Rate Limit Notice & Retry Action */}
+          {aiResult?.isRateLimited && !analyzingAi && (
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                borderWidth: 1,
+                borderColor: '#f59e0b',
+                borderRadius: 10,
+                paddingVertical: 10,
+                paddingHorizontal: 12,
+                marginHorizontal: 12,
+                marginTop: 10,
+              }}
+              onPress={runAi}
+            >
+              <RefreshCw size={15} color="#f59e0b" />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#f59e0b' }}>
+                AI Congested (429) · Tap to Retry Analysis
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <View style={styles.aiList}>
             {aiRows.map(({ label, value, Icon, isTelemetry }) => (
               <View key={label} style={styles.aiRow}>
@@ -246,13 +278,21 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
 
         {/* Submit Action */}
         <TouchableOpacity
-          style={[styles.submitButton, submitting && { opacity: 0.7 }]}
+          style={[styles.submitButton, (submitting || analyzingAi) && { opacity: 0.6 }]}
           onPress={handleSubmit}
-          disabled={submitting}
+          disabled={submitting || analyzingAi}
         >
-          <Lock size={18} color="#000" />
+          {analyzingAi ? (
+            <ActivityIndicator size="small" color="#000" />
+          ) : (
+            <Lock size={18} color="#000" />
+          )}
           <Text style={styles.submitText}>
-            {submitting ? 'Uploading evidence…' : 'Submit to Private Vault'}
+            {analyzingAi
+              ? 'Analyzing evidence with Qwen 2.5-VL…'
+              : submitting
+              ? 'Uploading evidence…'
+              : 'Submit to Private Vault'}
           </Text>
         </TouchableOpacity>
 
