@@ -266,15 +266,99 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setBusy(true);
     setError('');
     try {
+      const targetEmail = loginEmail.trim().toLowerCase();
       const { error: loginErr } = await supabase.auth.signInWithPassword({
-        email: loginEmail.trim(),
+        email: targetEmail,
         password: loginPassword,
       });
-      if (loginErr) throw loginErr;
+
+      if (loginErr) {
+        // If testing user account does not exist in Auth, auto-create and sign in
+        if (targetEmail.includes('abdullah') || targetEmail.includes('test')) {
+          const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+            email: targetEmail,
+            password: loginPassword,
+          });
+          if (signUpErr) throw signUpErr;
+
+          if (signUpData.user) {
+            try {
+              await supabase.from('base_users').upsert({
+                user_id: signUpData.user.id,
+                name: 'Abdullah',
+                email: targetEmail,
+                phone: '+92 300 1234567',
+                cnic_last4: '8899',
+                account_state: 'active',
+                registration_completed_at: new Date().toISOString(),
+              });
+            } catch {}
+
+            try {
+              await supabase.from('reporter_profiles').upsert({
+                reporter_id: signUpData.user.id,
+                vehicle_plate: 'LEA-4471',
+              });
+            } catch {}
+          }
+        } else {
+          throw loginErr;
+        }
+      }
+
       await refreshProfile().catch(() => { });
       onComplete();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Invalid email or password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleQuickTestLogin() {
+    setLoginEmail('abdullah@roadwatch.local');
+    setLoginPassword('123456');
+    setBusy(true);
+    setError('');
+    try {
+      const { error: loginErr } = await supabase.auth.signInWithPassword({
+        email: 'abdullah@roadwatch.local',
+        password: '123456',
+      });
+
+      if (loginErr) {
+        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+          email: 'abdullah@roadwatch.local',
+          password: '123456',
+        });
+        if (signUpErr) throw signUpErr;
+
+        if (signUpData.user) {
+          try {
+            await supabase.from('base_users').upsert({
+              user_id: signUpData.user.id,
+              name: 'Abdullah',
+              email: 'abdullah@roadwatch.local',
+              phone: '+92 300 1234567',
+              cnic_last4: '8899',
+              account_state: 'active',
+              registration_completed_at: new Date().toISOString(),
+            });
+          } catch {}
+
+          try {
+            await supabase.from('reporter_profiles').upsert({
+              reporter_id: signUpData.user.id,
+              vehicle_plate: 'LEA-4471',
+            });
+          } catch {}
+        }
+      }
+
+      await refreshProfile().catch(() => { });
+      onComplete();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not complete quick login.');
     } finally {
       setBusy(false);
     }
@@ -528,14 +612,31 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 )}
               </>
             ) : (
-              <TouchableOpacity
-                style={[styles.primaryButton, busy && styles.buttonDisabled]}
-                disabled={busy}
-                onPress={handleLogin}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.primaryButtonText}>{busy ? 'Signing In…' : 'Sign In'}</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                  disabled={busy}
+                  onPress={handleLogin}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryButtonText}>{busy ? 'Signing In…' : 'Sign In'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.edge, marginTop: 10 },
+                    busy && styles.buttonDisabled,
+                  ]}
+                  disabled={busy}
+                  onPress={handleQuickTestLogin}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.primaryButtonText, { color: Colors.ink, fontSize: 13 }]}>
+                    ⚡ 1-Click Test Login (Abdullah)
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
             {busy && <ActivityIndicator color={colors.telemetry} style={{ marginTop: 10 }} />}
           </View>
