@@ -57,7 +57,15 @@ export async function uploadReport(
     const userId = session?.user?.id;
 
     if (userId) {
-      // Ensure reporter profile exists so foreign key reports_reporter_id_fkey is satisfied
+      // 1. Ensure base_users exists so reporter_profiles and reports foreign keys are satisfied
+      await supabase.from('base_users').upsert({
+        user_id: userId,
+        email: session?.user?.email || 'citizen@roadwatch.local',
+        account_state: 'active',
+        registration_completed_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+
+      // 2. Ensure reporter_profiles exists
       await supabase.from('reporter_profiles').upsert(
         { reporter_id: userId, trust_score: 100 },
         { onConflict: 'reporter_id' }

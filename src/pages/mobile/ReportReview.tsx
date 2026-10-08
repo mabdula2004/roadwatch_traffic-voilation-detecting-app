@@ -40,6 +40,8 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
     setAnalyzingAi(true);
     try {
       const result = await analyzeTrafficViolation({
+        videoUri: clip.uri,
+        durationMs: clip.durationMs,
         claimedClass,
         capturedAt: clip.capturedAt,
         latitude: clip.latitude,

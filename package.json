@@ -21,6 +21,7 @@
     "expo-location": "^57.0.20",
     "expo-status-bar": "~57.0.1",
     "expo-video": "~57.0.5",
+    "expo-video-thumbnails": "~57.0.2",
     "framer-motion": "^14.0.0",
     "lucide-react": "^1.52.0",
     "lucide-react-native": "^1.52.0",
