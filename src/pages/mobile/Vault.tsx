@@ -12,6 +12,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { pendingUploads } from '../../data/queue';
 import { Colors } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
+import { getLocalReports } from '../../lib/report';
 
 type ReportRow = { report_id: string; claimed_class: string; captured_at: string; status: string; geo_lat: number | null; geo_long: number | null };
 
@@ -24,18 +25,47 @@ export function Vault() {
     let alive = true;
     async function load() {
       try {
-        const { data, error } = await supabase.from('reports').select('report_id,claimed_class,captured_at,status,geo_lat,geo_long').order('captured_at', { ascending: false }).limit(100);
+        const localList = await getLocalReports();
+        const formattedLocal: ReportRow[] = localList.map(item => ({
+          report_id: item.reportId,
+          claimed_class: item.claimedClass,
+          captured_at: item.capturedAt,
+          status: item.status,
+          geo_lat: item.latitude,
+          geo_long: item.longitude,
+        }));
+
+        const { data, error } = await supabase
+          .from('reports')
+          .select('report_id,claimed_class,captured_at,status,geo_lat,geo_long')
+          .order('captured_at', { ascending: false })
+          .limit(100);
+
         if (alive) {
-          if (error) {
-            setReports([]);
-          } else {
-            setReports(data ?? []);
+          const remoteList = (!error && data) ? data : [];
+          // Merge by report_id
+          const seen = new Set<string>();
+          const combined: ReportRow[] = [];
+          for (const r of [...remoteList, ...formattedLocal]) {
+            if (!seen.has(r.report_id)) {
+              seen.add(r.report_id);
+              combined.push(r);
+            }
           }
+          setReports(combined);
           setLoadError('');
         }
       } catch {
         if (alive) {
-          setReports([]);
+          const localOnly = await getLocalReports();
+          setReports(localOnly.map(item => ({
+            report_id: item.reportId,
+            claimed_class: item.claimedClass,
+            captured_at: item.capturedAt,
+            status: item.status,
+            geo_lat: item.latitude,
+            geo_long: item.longitude,
+          })));
           setLoadError('');
         }
       }

@@ -17,7 +17,9 @@ import { SafetySettings } from './src/pages/mobile/SafetySettings';
 import { Settings } from './src/pages/mobile/Settings';
 import { ProfileSettings } from './src/pages/mobile/ProfileSettings';
 import { ChangePassword } from './src/pages/mobile/ChangePassword';
+import { ReportOutcome } from './src/pages/mobile/ReportOutcome';
 import { BottomNav } from './src/components/mobile/BottomNav';
+import type { AiEvidentiaryResult } from './src/lib/aiAnalysis';
 
 function MainApp() {
   const { colors } = useTheme();
@@ -25,6 +27,7 @@ function MainApp() {
   const [ready, setReady] = useState(false);
   const [activeScreen, setActiveScreen] = useState<string>('capture');
   const [clip, setClip] = useState<CapturedClip | null>(null);
+  const [latestOutcome, setLatestOutcome] = useState<AiEvidentiaryResult | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -41,7 +44,7 @@ function MainApp() {
     void checkRegistration().catch(() => { if (mounted) setReady(true); });
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
-        if (mounted) { setIsOnboarded(false); setClip(null); setActiveScreen('capture'); }
+        if (mounted) { setIsOnboarded(false); setClip(null); setLatestOutcome(null); setActiveScreen('capture'); }
       } else setTimeout(() => { void checkRegistration().catch(() => {}); }, 0);
     });
     return () => { mounted = false; data.subscription.unsubscribe(); };
@@ -73,7 +76,27 @@ function MainApp() {
           <ReportReview
             clip={clip}
             onBack={() => { setClip(null); setActiveScreen('capture'); }}
-            onSubmit={() => { setClip(null); setActiveScreen('vault'); }}
+            onSubmit={(_id, aiResult) => {
+              setLatestOutcome(aiResult);
+              setActiveScreen('outcome');
+            }}
+          />
+        )}
+
+        {activeScreen === 'outcome' && clip && latestOutcome && (
+          <ReportOutcome
+            clip={clip}
+            aiResult={latestOutcome}
+            onGoToVault={() => {
+              setClip(null);
+              setLatestOutcome(null);
+              setActiveScreen('vault');
+            }}
+            onRecordAnother={() => {
+              setClip(null);
+              setLatestOutcome(null);
+              setActiveScreen('capture');
+            }}
           />
         )}
 

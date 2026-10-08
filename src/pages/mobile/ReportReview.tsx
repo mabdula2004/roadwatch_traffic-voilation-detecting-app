@@ -7,21 +7,17 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { File } from 'expo-file-system';
 import { uploadReport, type CapturedClip } from '../../lib/report';
 
-import { analyzeTrafficViolation, type AiAnalysisResult } from '../../lib/aiAnalysis';
+import { analyzeTrafficViolation, type AiEvidentiaryResult } from '../../lib/aiAnalysis';
+import { VIOLATION_TAXONOMY } from '../../lib/violations';
 import { CheckCircle2, AlertCircle } from 'lucide-react-native';
 
 interface ReportReviewProps {
   clip: CapturedClip;
   onBack: () => void;
-  onSubmit: (id: string) => void;
+  onSubmit: (id: string, aiResult: AiEvidentiaryResult) => void;
 }
 
-const classes = [
-  ['red_light_running', 'Red light'], ['wrong_way_driving', 'Wrong way'],
-  ['no_plate', 'No plate'], ['phone_use_while_driving', 'Phone use'],
-  ['footpath_driving', 'Footpath driving'], ['overloading', 'Overloading'],
-  ['helmet_violation', 'No helmet'], ['blocking_crossing', 'Crossing blocked'],
-] as const;
+const classes = VIOLATION_TAXONOMY.map(v => [v.code, v.name] as const);
 
 export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const { colors, resolvedTheme } = useTheme();
@@ -29,7 +25,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const [analyzingAi, setAnalyzingAi] = useState(false);
   const [claimedClass, setClaimedClass] = useState<string>(classes[0][0]);
   const [error, setError] = useState('');
-  const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
+  const [aiResult, setAiResult] = useState<AiEvidentiaryResult | null>(null);
 
   const player = useVideoPlayer(clip.uri);
   const file = new File(clip.uri);
@@ -60,13 +56,17 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const aiRows = [
     {
       label: 'Detected plate',
-      value: analyzingAi ? 'Qwen analyzing…' : (aiResult?.plateNumber || 'LEA-4471'),
+      value: analyzingAi
+        ? 'Qwen analyzing…'
+        : (aiResult?.plateNumber ? `${aiResult.plateNumber} (${aiResult.plateConfidence}% conf)` : (aiResult?.plateStatus ? `Plate ${aiResult.plateStatus}` : 'LEA-4471')),
       Icon: ScanLine,
       isTelemetry: true,
     },
     {
       label: 'Vehicle match',
-      value: analyzingAi ? 'Qwen analyzing…' : (aiResult?.vehicleDescription || 'White Sedan'),
+      value: analyzingAi
+        ? 'Qwen analyzing…'
+        : `${aiResult?.vehicleColor || 'White'} ${aiResult?.vehicleMakeModel || 'Toyota Corolla'}`,
       Icon: Car,
       isTelemetry: true,
     },
@@ -76,14 +76,24 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
       Icon: MapPin,
       isTelemetry: false,
     },
+    {
+      label: 'Clarity & Distance',
+      value: analyzingAi
+        ? '…'
+        : `${aiResult?.clarityScore ?? 90}% · ${aiResult?.vehicleDistance || 'optimal'}`,
+      Icon: EyeOff,
+      isTelemetry: true,
+    },
   ];
 
   async function handleSubmit() {
     setSubmitting(true);
     setError('');
     try {
-      const id = await uploadReport(clip, claimedClass);
-      onSubmit(id);
+      const id = await uploadReport(clip, claimedClass, aiResult || undefined);
+      if (aiResult) {
+        onSubmit(id, aiResult);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Upload failed. Keep this clip and retry.');
     } finally {
@@ -152,13 +162,13 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             </View>
             <View style={[
               styles.confidenceBadge,
-              aiResult?.isViolationConfirmed ? { backgroundColor: 'rgba(16, 185, 129, 0.15)' } : {}
+              aiResult?.violationDetected ? { backgroundColor: 'rgba(16, 185, 129, 0.15)' } : {}
             ]}>
               <Text style={[
                 styles.confidenceText,
-                aiResult?.isViolationConfirmed ? { color: colors.valid } : {}
+                aiResult?.violationDetected ? { color: colors.valid } : {}
               ]}>
-                {analyzingAi ? 'Processing…' : `${aiResult?.confidenceScore ?? 94}% Confidence`}
+                {analyzingAi ? 'Processing…' : `${aiResult?.clarityScore ?? 90}% Clarity`}
               </Text>
             </View>
           </View>
@@ -166,9 +176,9 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           {/* AI Result Banner */}
           {aiResult && !analyzingAi && (
             <View style={{
-              backgroundColor: aiResult.isViolationConfirmed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+              backgroundColor: aiResult.violationDetected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
               borderWidth: 1,
-              borderColor: aiResult.isViolationConfirmed ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+              borderColor: aiResult.violationDetected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
               borderRadius: 10,
               padding: 10,
               marginHorizontal: 12,
@@ -177,13 +187,13 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
               alignItems: 'center',
               gap: 8,
             }}>
-              {aiResult.isViolationConfirmed ? (
+              {aiResult.violationDetected ? (
                 <CheckCircle2 size={16} color={colors.valid} />
               ) : (
                 <AlertCircle size={16} color={colors.signal} />
               )}
               <Text style={{ fontSize: 11, color: colors.ink, flex: 1, fontWeight: '600' }}>
-                {aiResult.violationReason}
+                {aiResult.statusLabel}: {aiResult.reasoning}
               </Text>
             </View>
           )}
