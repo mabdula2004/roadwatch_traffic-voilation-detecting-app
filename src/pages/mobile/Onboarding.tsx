@@ -612,31 +612,14 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 )}
               </>
             ) : (
-              <>
-                <TouchableOpacity
-                  style={[styles.primaryButton, busy && styles.buttonDisabled]}
-                  disabled={busy}
-                  onPress={handleLogin}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.primaryButtonText}>{busy ? 'Signing In…' : 'Sign In'}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.edge, marginTop: 10 },
-                    busy && styles.buttonDisabled,
-                  ]}
-                  disabled={busy}
-                  onPress={handleQuickTestLogin}
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.primaryButtonText, { color: Colors.ink, fontSize: 13 }]}>
-                    ⚡ 1-Click Test Login (Abdullah)
-                  </Text>
-                </TouchableOpacity>
-              </>
+              <TouchableOpacity
+                style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                disabled={busy}
+                onPress={handleLogin}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryButtonText}>{busy ? 'Signing In…' : 'Sign In'}</Text>
+              </TouchableOpacity>
             )}
             {busy && <ActivityIndicator color={colors.telemetry} style={{ marginTop: 10 }} />}
           </View>
