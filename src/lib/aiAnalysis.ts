@@ -1,5 +1,5 @@
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import { File } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { VIOLATION_TAXONOMY, FINE_SCHEDULE, getViolationMeta } from './violations';
 
 export type PlateStatus = 'clear' | 'blurred' | 'too_far' | 'obscured' | 'missing' | 'glare_or_dark';
@@ -43,25 +43,37 @@ const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen2.5-vl-72b-instru
 const VIOLATION_LIST_PROMPT = VIOLATION_TAXONOMY.map(v => `- ${v.code} (${v.name}): ${v.description}`).join('\n');
 
 /**
- * Extracts 2 representative JPEG frames from the recorded video clip to send to Qwen Vision
+ * Extracts 3 representative JPEG frames from the recorded video clip to send to Qwen Vision
  */
 async function extractVideoFrames(videoUri?: string, durationMs: number = 10000): Promise<string[]> {
   if (!videoUri) return [];
   const frames: string[] = [];
   try {
-    const t1 = Math.max(1000, Math.floor(durationMs * 0.25));
-    const t2 = Math.max(3000, Math.floor(durationMs * 0.65));
+    // Brief settle time so media encoder has finalized video file descriptor on Android
+    await new Promise(r => setTimeout(r, 200));
 
-    for (const time of [t1, t2]) {
+    const dur = Math.max(durationMs, 10000);
+    const times = [
+      Math.max(1000, Math.floor(dur * 0.20)),
+      Math.max(2500, Math.floor(dur * 0.50)),
+      Math.max(4000, Math.floor(dur * 0.80)),
+    ];
+
+    for (const time of times) {
       try {
         const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
           time,
-          quality: 0.6,
+          quality: 0.5,
         });
-        const file = new File(uri);
-        const b64 = await file.base64();
-        if (b64) {
-          frames.push(b64);
+        if (uri) {
+          const b64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          if (b64 && b64.length > 50) {
+            frames.push(b64);
+          }
+          // Cleanup cached thumbnail file
+          await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
         }
       } catch (thumbErr) {
         console.log(`Video frame sample at ${time}ms note:`, thumbErr);
@@ -172,11 +184,6 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
         },
         body: JSON.stringify({
           model: AI_MODEL,
-          models: [
-            AI_MODEL,
-            'qwen/qwen3-vl-32b-instruct',
-            'qwen/qwen3-vl-30b-a3b-instruct',
-          ],
           messages: [{ role: 'user', content: userContent }],
           temperature: 0.1,
           max_tokens: 350,

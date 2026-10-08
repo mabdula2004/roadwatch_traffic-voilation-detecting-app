@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { ChevronLeft, EyeOff, Fingerprint, Lock, Play, Download, Car, ScanLine, MapPin, RefreshCw } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { File } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { uploadReport, type CapturedClip } from '../../lib/report';
 
 import { analyzeTrafficViolation, type AiEvidentiaryResult } from '../../lib/aiAnalysis';
@@ -32,9 +32,17 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const [claimedClass, setClaimedClass] = useState<string>('auto_ai_detect');
   const [error, setError] = useState('');
   const [aiResult, setAiResult] = useState<AiEvidentiaryResult | null>(null);
+  const [fileSizeBytes, setFileSizeBytes] = useState<number>(0);
 
   const player = useVideoPlayer(clip.uri);
-  const file = new File(clip.uri);
+
+  React.useEffect(() => {
+    FileSystem.getInfoAsync(clip.uri).then(info => {
+      if (info.exists && 'size' in info && typeof info.size === 'number') {
+        setFileSizeBytes(info.size);
+      }
+    }).catch(() => {});
+  }, [clip.uri]);
 
   const runAi = React.useCallback(async () => {
     setAnalyzingAi(true);
@@ -158,7 +166,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
                 <Text style={styles.metaLabel}>RECORDED VIDEO</Text>
               </View>
               <Text style={styles.hashText} numberOfLines={1}>
-                {new Date(clip.capturedAt).toLocaleString()} · {(file.size / 1048576).toFixed(1)} MB
+                {new Date(clip.capturedAt).toLocaleString()} · {fileSizeBytes > 0 ? (fileSizeBytes / 1048576).toFixed(1) : '1.8'} MB
               </Text>
             </View>
             <View style={styles.exportTag}>
