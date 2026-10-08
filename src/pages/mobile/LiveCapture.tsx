@@ -73,20 +73,8 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
       setGps({ latitude, longitude, accuracy });
       const capturedAt = new Date().toISOString();
       const startMs = Date.now();
-      // Take an initial visual frame of the traffic scene
-      let startFrameB64: string | undefined;
-      try {
-        const snap = await camera.current.takePictureAsync({
-          base64: true,
-          quality: 0.6,
-          skipProcessing: true,
-        });
-        startFrameB64 = snap?.base64;
-      } catch (snapErr) {
-        console.log('Start frame snapshot note:', snapErr);
-      }
-
-      setPreparing(false); setRecording(true);
+      setPreparing(false);
+      setRecording(true);
       const result = await camera.current.recordAsync({ maxDuration: 30, maxFileSize: 50 * 1024 * 1024 });
       const durationMs = Date.now() - startMs;
       if (durationMs < 10000) {
@@ -98,21 +86,6 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
         return;
       }
 
-      // Take a final visual frame of the traffic scene
-      let endFrameB64: string | undefined;
-      try {
-        const snap2 = await camera.current.takePictureAsync({
-          base64: true,
-          quality: 0.6,
-          skipProcessing: true,
-        });
-        endFrameB64 = snap2?.base64;
-      } catch (snapErr2) {
-        console.log('End frame snapshot note:', snapErr2);
-      }
-
-      const framesBase64 = [startFrameB64, endFrameB64].filter(Boolean) as string[];
-
       if (result?.uri) {
         onCapture({
           clientCaptureId: Crypto.randomUUID(),
@@ -122,7 +95,6 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
           longitude,
           accuracy,
           durationMs,
-          framesBase64,
         });
       }
     } catch (cause) { Alert.alert('Capture unavailable', cause instanceof Error ? cause.message : 'Video record nahi ho saka.'); }

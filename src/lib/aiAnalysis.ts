@@ -43,6 +43,42 @@ const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen2.5-vl-72b-instru
 const VIOLATION_LIST_PROMPT = VIOLATION_TAXONOMY.map(v => `- ${v.code} (${v.name}): ${v.description}`).join('\n');
 
 /**
+ * Reads an image file URI as Base64 in React Native without Expo Go sandbox permission blocks
+ */
+async function readImageUriAsBase64(uri: string): Promise<string | null> {
+  // Method 1: Web-standard fetch blob conversion (bypasses Android Expo FilePermissionService sandbox)
+  try {
+    const res = await fetch(uri);
+    const blob = await res.blob();
+    const b64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        const raw = result.includes(',') ? result.split(',')[1] : result;
+        if (raw && raw.length > 50) {
+          resolve(raw);
+        } else {
+          reject(new Error('Empty base64'));
+        }
+      };
+      reader.onerror = () => reject(new Error('FileReader failure'));
+      reader.readAsDataURL(blob);
+    });
+    if (b64) return b64;
+  } catch {}
+
+  // Method 2: Fallback to legacy FileSystem
+  try {
+    const b64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    if (b64 && b64.length > 50) return b64;
+  } catch {}
+
+  return null;
+}
+
+/**
  * Extracts 3 representative JPEG frames from the recorded video clip to send to Qwen Vision
  */
 async function extractVideoFrames(videoUri?: string, durationMs: number = 10000): Promise<string[]> {
@@ -50,7 +86,7 @@ async function extractVideoFrames(videoUri?: string, durationMs: number = 10000)
   const frames: string[] = [];
   try {
     // Brief settle time so media encoder has finalized video file descriptor on Android
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 250));
 
     const dur = Math.max(durationMs, 10000);
     const times = [
@@ -66,10 +102,8 @@ async function extractVideoFrames(videoUri?: string, durationMs: number = 10000)
           quality: 0.5,
         });
         if (uri) {
-          const b64 = await FileSystem.readAsStringAsync(uri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          if (b64 && b64.length > 50) {
+          const b64 = await readImageUriAsBase64(uri);
+          if (b64) {
             frames.push(b64);
           }
           // Cleanup cached thumbnail file
