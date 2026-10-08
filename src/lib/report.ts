@@ -57,11 +57,17 @@ export async function uploadReport(
     const userId = session?.user?.id;
 
     if (userId) {
+      // Ensure reporter profile exists so foreign key reports_reporter_id_fkey is satisfied
+      await supabase.from('reporter_profiles').upsert(
+        { reporter_id: userId, trust_score: 100 },
+        { onConflict: 'reporter_id' }
+      );
+
       const { data: insertedReport, error: insertError } = await supabase
         .from('reports')
         .insert({
           reporter_id: userId,
-          claimed_class: claimedClass,
+          claimed_class: claimedClass === 'auto_ai_detect' ? (aiResult?.violationType || 'red_light_running') : claimedClass,
           captured_at: clip.capturedAt,
           uploaded_at: new Date().toISOString(),
           geo_lat: clip.latitude,

@@ -17,13 +17,19 @@ interface ReportReviewProps {
   onSubmit: (id: string, aiResult: AiEvidentiaryResult) => void;
 }
 
-const classes = VIOLATION_TAXONOMY.map(v => [v.code, v.name] as const);
+const quickFocusClasses = [
+  ['auto_ai_detect', '🤖 AI Autonomous Scan (All 20 Rules)'],
+  ['red_light_running', 'Red Light'],
+  ['helmet_violation', 'No Helmet'],
+  ['wrong_way_driving', 'Wrong Way'],
+  ['phone_use_while_driving', 'Phone Use'],
+] as const;
 
 export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const { colors, resolvedTheme } = useTheme();
   const [submitting, setSubmitting] = useState(false);
   const [analyzingAi, setAnalyzingAi] = useState(false);
-  const [claimedClass, setClaimedClass] = useState<string>(classes[0][0]);
+  const [claimedClass, setClaimedClass] = useState<string>('auto_ai_detect');
   const [error, setError] = useState('');
   const [aiResult, setAiResult] = useState<AiEvidentiaryResult | null>(null);
 
@@ -157,7 +163,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         <View style={styles.aiCard}>
           <View style={styles.aiHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.aiTitle}>Qwen 2.5 VL Analysis</Text>
+              <Text style={styles.aiTitle}>Qwen 2.5-VL-72B Instruct Analysis</Text>
               {analyzingAi && <ActivityIndicator size="small" color={colors.telemetry} />}
             </View>
             <View style={[
@@ -211,21 +217,25 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           </View>
 
           <View style={styles.violationTag}>
-            <Text style={styles.violationLabel}>WHAT DID YOU SEE? · YOUR CLAIM</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-              {classes.map(([value, label]) => (
+            <Text style={styles.violationLabel}>AI ENFORCEMENT FOCUS (OPTIONAL)</Text>
+            <Text style={{ fontSize: 11, color: colors.muted, marginTop: 2, marginBottom: 6 }}>
+              Qwen2.5-VL-72B autonomously scans the video against all 20 rules. Tap below only to set a specific hint.
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+              {quickFocusClasses.map(([value, label]) => (
                 <TouchableOpacity
                   key={value}
                   onPress={() => setClaimedClass(value)}
                   style={{
-                    padding: 8,
+                    paddingHorizontal: 10,
+                    paddingVertical: 7,
                     borderRadius: 8,
                     borderWidth: 1,
                     borderColor: claimedClass === value ? colors.telemetry : colors.edge,
-                    backgroundColor: claimedClass === value ? 'rgba(6, 182, 212, 0.1)' : 'transparent',
+                    backgroundColor: claimedClass === value ? 'rgba(6, 182, 212, 0.12)' : 'transparent',
                   }}
                 >
-                  <Text style={{ color: colors.ink, fontSize: 11, fontWeight: claimedClass === value ? 'bold' : 'normal' }}>
+                  <Text style={{ color: claimedClass === value ? colors.telemetry : colors.ink, fontSize: 11, fontWeight: claimedClass === value ? 'bold' : 'normal' }}>
                     {label}
                   </Text>
                 </TouchableOpacity>
