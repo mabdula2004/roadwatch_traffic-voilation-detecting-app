@@ -11,6 +11,7 @@ export interface CapturedClip {
   longitude: number;
   accuracy: number | null;
   durationMs: number;
+  framesBase64?: string[];
 }
 
 export interface StoredCaseReport {

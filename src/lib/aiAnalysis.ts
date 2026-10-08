@@ -79,6 +79,7 @@ async function extractVideoFrames(videoUri?: string, durationMs: number = 10000)
 export async function analyzeTrafficViolation(params: {
   videoUri?: string;
   durationMs?: number;
+  framesBase64?: string[];
   claimedClass: string;
   capturedAt: string;
   latitude: number;
@@ -87,21 +88,49 @@ export async function analyzeTrafficViolation(params: {
   const caseId = `CASE-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
   // Extract real video frames for Qwen2.5-VL to see!
-  const frames = await extractVideoFrames(params.videoUri, params.durationMs || 10000);
+  const extracted = await extractVideoFrames(params.videoUri, params.durationMs || 10000);
+  const frames = [...(params.framesBase64 || []), ...extracted]
+    .filter(b => typeof b === 'string' && b.length > 50)
+    .slice(0, 3);
+
+  if (frames.length === 0) {
+    return {
+      caseId,
+      violationDetected: false,
+      violationType: null,
+      violationName: 'Camera Frame Capture Pending',
+      vehicleDistance: 'optimal',
+      plateStatus: 'blurred',
+      plateNumber: null,
+      plateConfidence: 0,
+      clarityScore: 0,
+      rejectionReason: 'low_clarity',
+      vehicleMakeModel: 'Not Captured',
+      vehicleColor: 'Unknown',
+      vehicleType: 'Unknown',
+      fineAmountPkr: 0,
+      status: 'no_violation',
+      statusLabel: 'Visual Frame Capture Error',
+      reasoning: 'Camera image frames could not be read for AI vision analysis. Please re-record the clip.',
+      notes: 'No camera frames were passed to Qwen.',
+      analyzedAt: new Date().toISOString(),
+      isRateLimited: true,
+    };
+  }
 
   const prompt = `You are RoadWatch AI powered by Qwen2.5-VL-72B Instruct, a strict traffic-violation enforcement vision system.
-You are given ${frames.length > 0 ? `${frames.length} sampled image frames from a citizen's recorded video evidence.` : 'traffic recording event metadata.'}
+You are inspecting ${frames.length} real image frames captured directly from citizen traffic recording.
 
-Carefully inspect the visual evidence:
-- Check if there is actual road traffic, vehicles, or pedestrians in the images. If there are NO vehicles (e.g. an indoor room, desk, computer screen, or person indoors), set "violation_detected": false, "rejection_reason": "no_violation", and explain clearly in reasoning.
-- If vehicles are present, look for any of these 20 traffic violation types:
+INSPECT THE IMAGES CAREFULLY:
+1. WHAT IS VISIBLE: Are there motor vehicles on a public road, or is this an indoor room, laptop screen, desk, or non-traffic scene?
+   - If this is an indoor room, laptop, wall, floor, or contains no moving road vehicles: set "violation_detected": false, "rejection_reason": "no_violation", "vehicle_make_model": "None (Indoor/Non-Traffic)", and in "reasoning" state clearly: "Observed indoor scene/laptop, no public traffic or vehicle violations present."
+2. IF ROAD VEHICLES ARE PRESENT:
+   - Identify vehicle make, model, type, and color (e.g. "Toyota Corolla Sedan" or "Honda 70 Motorcycle").
+   - Read the license plate if legible. If blurred or unreadable, set "plate_number": null, "plate_status": "blurred".
+   - Check if the vehicle commits any of the 20 violations (e.g. "red_light_running", "helmet_violation", "wrong_way_driving", etc.):
 ${VIOLATION_LIST_PROMPT}
-
-STRICT EVIDENTIARY RULES:
-1. VEHICLE DISTANCE: "optimal" | "too_far" | "too_close". If too_far, set rejection_reason to "vehicle_too_far" and violation_detected to false.
-2. NUMBER PLATE: "clear" | "blurred" | "too_far" | "obscured" | "missing" | "glare_or_dark". If blurred or indistinct, NEVER hallucinate characters! Set plate_number to null, plate_confidence to 0.0, and rejection_reason to "plate_blurred".
-3. CLARITY: Rate 0.0 to 1.0. If under 0.5, reject for low_clarity.
-4. If a vehicle crosses an active red traffic light line, identify make, model, color, and set violation_detected to true with violation_type: "red_light_running".
+   - If a violation occurred, set "violation_detected": true, and "violation_type" to the exact violation code.
+   - If vehicle is following traffic rules normally, set "violation_detected": false, "rejection_reason": "no_violation".
 
 Respond ONLY with a single JSON object (no markdown, no backticks):
 {
@@ -111,12 +140,12 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
   "plate_status": "clear",
   "plate_number": null,
   "plate_confidence": 0.0,
-  "clarity_score": 0.85,
-  "vehicle_make_model": "Unknown",
+  "clarity_score": 0.90,
+  "vehicle_make_model": "Not Identified",
   "vehicle_color": "Unknown",
   "vehicle_type": "Unknown",
   "rejection_reason": "no_violation",
-  "reasoning": "Clear factual description of what is actually visible in the video frames."
+  "reasoning": "Factual description of what is actually visible in the provided image frames."
 }`;
 
   const userContent: any[] = [{ type: 'text', text: prompt }];
