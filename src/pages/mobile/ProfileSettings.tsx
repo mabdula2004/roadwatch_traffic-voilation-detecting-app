@@ -27,8 +27,8 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
     }
     setSaving(true);
     try {
-      await updateProfile({ name: name.trim(), email: email.trim(), plate: plate.trim() });
-      Alert.alert('Profile Updated', 'Your profile was saved. Email is self supplied and not verified.');
+      await updateProfile({ name: name.trim(), email: email.trim(), phone: phone.trim(), plate: plate.trim() });
+      Alert.alert('Profile Updated', 'Your profile details have been saved successfully.');
       onBack();
     } catch (cause) { Alert.alert('Save failed', cause instanceof Error ? cause.message : 'Please retry.'); }
     finally { setSaving(false); }
@@ -85,7 +85,8 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.edge, color: colors.text }]}
             value={phone}
-            editable={false}
+            onChangeText={setPhone}
+            editable={true}
             placeholder="+92 300 1234567"
             placeholderTextColor={colors.muted}
             keyboardType="phone-pad"

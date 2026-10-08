@@ -18,7 +18,10 @@ import { OtpInput } from '../../components/mobile/OtpInput';
 import { supabase } from '../../lib/supabase';
 import { useUserProfile } from '../../contexts/UserContext';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 export const OTP_LENGTH = 6;
+const ONBOARDING_TEMP_STORAGE_KEY = '@roadwatch_onboarding_draft';
 
 function formatCnic(raw: string) {
   const digits = raw.replace(/\D/g, '').slice(0, 13);
@@ -107,6 +110,22 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const passwordMatched = passwordValid && password === confirmPassword;
   const isEmailVerified = verifiedEmail.toLowerCase() === email.trim().toLowerCase() && !!verifiedEmail;
 
+  // Restore draft if user was in middle of verification
+  useEffect(() => {
+    void AsyncStorage.getItem(ONBOARDING_TEMP_STORAGE_KEY).then((raw) => {
+      if (raw) {
+        try {
+          const draft = JSON.parse(raw);
+          if (draft.name && !name) setName(draft.name);
+          if (draft.cnic && !cnic) setCnic(draft.cnic);
+          if (draft.phone && !phone) setPhone(draft.phone);
+          if (draft.vehicle && !vehicle) setVehicle(draft.vehicle);
+          if (draft.email && !email) setEmail(draft.email);
+        } catch {}
+      }
+    });
+  }, []);
+
   async function sendCode() {
     if (busy) return;
     if (!emailValid(email)) {
@@ -117,6 +136,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setBusy(true);
     setError('');
     setCodeSentSuccess(false);
+
+    // Persist draft to storage
+    await AsyncStorage.setItem(
+      ONBOARDING_TEMP_STORAGE_KEY,
+      JSON.stringify({ name, cnic, phone, vehicle, email: email.trim() })
+    ).catch(() => {});
+
     try {
       const targetEmail = email.trim();
       const { error: otpErr } = await supabase.auth.signInWithOtp({
@@ -241,6 +267,17 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           });
         } catch {}
       }
+
+      // Save directly to UserContext and Local Cache immediately
+      const profileToCache = {
+        name: name.trim(),
+        email: email.trim(),
+        phone: formattedPhone || '',
+        cnic: `••••••••${cnicLast4}`,
+        plate: vehicle.trim() || '',
+      };
+      await AsyncStorage.setItem('@roadwatch_user_profile', JSON.stringify(profileToCache)).catch(() => {});
+      await AsyncStorage.removeItem(ONBOARDING_TEMP_STORAGE_KEY).catch(() => {});
 
       await refreshProfile().catch(() => { });
       onComplete();

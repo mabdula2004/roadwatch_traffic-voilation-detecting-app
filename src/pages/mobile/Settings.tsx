@@ -41,22 +41,35 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
 
   const [sheet, setSheet] = useState<'language' | 'theme' | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [trustScore, setTrustScore] = useState<number | null>(null);
+  const [trustScore, setTrustScore] = useState<number>(100);
   const [stats, setStats] = useState({ approved: 0, rejected: 0 });
   useEffect(() => {
     let alive = true;
     async function load() {
-      const [reporter, reports] = await Promise.all([
-        supabase.from('reporter_profiles').select('trust_score').single(),
-        supabase.from('reports').select('status').in('status', ['accepted', 'rejected']),
-      ]);
-      if (alive) {
-        if (!reporter.error) setTrustScore(reporter.data?.trust_score ?? null);
-        if (!reports.error) setStats({ approved: reports.data?.filter(r => r.status === 'accepted').length ?? 0, rejected: reports.data?.filter(r => r.status === 'rejected').length ?? 0 });
+      try {
+        const [reporter, reports] = await Promise.all([
+          supabase.from('reporter_profiles').select('trust_score').maybeSingle(),
+          supabase.from('reports').select('status').in('status', ['accepted', 'rejected']),
+        ]);
+        if (alive) {
+          if (!reporter.error && reporter.data?.trust_score !== null && reporter.data?.trust_score !== undefined) {
+            setTrustScore(reporter.data.trust_score);
+          } else {
+            setTrustScore(100);
+          }
+          if (!reports.error && reports.data) {
+            setStats({
+              approved: reports.data.filter(r => r.status === 'accepted').length,
+              rejected: reports.data.filter(r => r.status === 'rejected').length,
+            });
+          }
+        }
+      } catch {
+        if (alive) setTrustScore(100);
       }
     }
-    void load(); const timer = setInterval(() => { void load(); }, 12000);
-    return () => { alive = false; clearInterval(timer); };
+    void load();
+    return () => { alive = false; };
   }, []);
   useEffect(() => {
     let alive = true;
