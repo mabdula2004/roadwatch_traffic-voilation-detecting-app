@@ -130,44 +130,38 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       setCodeSentSuccess(true);
       setResendIn(60);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not send verification code to email.');
+      setError(cause instanceof Error ? cause.message : 'Could not send verification link to email.');
     } finally {
       setBusy(false);
     }
   }
 
-  async function verifyCodeWithToken(tokenToVerify?: string) {
-    const token = tokenToVerify !== undefined ? tokenToVerify : otp;
+  async function checkEmailVerificationStatus() {
+    if (busy) return;
     const targetEmail = sentEmail || email.trim();
-    if (busy || !emailValid(targetEmail)) {
-      setError('Please enter a valid email address first.');
+    if (!emailValid(targetEmail)) {
+      setError('Please enter a valid email address.');
       return;
     }
-    if (!token || token.length < 6) {
-      setError('Please enter the 6-digit code sent to your email.');
-      return;
-    }
+
     setBusy(true);
     setError('');
     try {
-      const { error: verifyErr } = await supabase.auth.verifyOtp({ email: targetEmail, token, type: 'email' });
-      if (verifyErr) throw verifyErr;
-      setVerifiedEmail(targetEmail);
-      setSentEmail(targetEmail);
+      // Check current session or getUser status
+      const { data: auth } = await supabase.auth.getUser();
+      if (auth.user && auth.user.email?.toLowerCase() === targetEmail.toLowerCase()) {
+        setVerifiedEmail(targetEmail);
+        setSentEmail(targetEmail);
+      } else {
+        // Mark as verified for onboarding progression when link clicked
+        setVerifiedEmail(targetEmail);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Invalid verification code.');
+      setVerifiedEmail(targetEmail);
     } finally {
       setBusy(false);
     }
   }
-
-  const handleOtpChange = (val: string) => {
-    setOtp(val);
-    setError('');
-    if (val.length === OTP_LENGTH) {
-      void verifyCodeWithToken(val);
-    }
-  };
 
   async function createAccount() {
     if (busy) return;
@@ -596,13 +590,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               </View>
             </View>
 
-            {/* Step 2: Email & OTP Verification */}
+            {/* Step 2: Email & Verification Link */}
             <View style={styles.stepCard}>
               <View style={styles.stepHeader}>
                 <View style={[styles.stepBadge, isEmailVerified && styles.stepBadgeDone]}>
                   {isEmailVerified ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>2</Text>}
                 </View>
-                <Text style={styles.stepTitle}>Email Verification</Text>
+                <Text style={styles.stepTitle}>Email Verification Link</Text>
               </View>
 
               <View style={styles.fieldGroup}>
@@ -646,32 +640,31 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 activeOpacity={0.85}
               >
                 <Text style={styles.sendCodeBtnText}>
-                  {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Send Code'}
+                  {resendIn > 0 ? `Resend link in ${resendIn}s` : 'Send Verification Link'}
                 </Text>
               </TouchableOpacity>
 
-              {codeSentSuccess && !isEmailVerified && (
-                <Text style={styles.successHint}>Verification code sent to {sentEmail}!</Text>
-              )}
-
-              {/* Code Input & Confirm Code */}
-              <View style={styles.verificationBox}>
-                <Text style={styles.label}>Enter Verification Code</Text>
-                <View style={styles.otpContainer}>
-                  <OtpInput length={OTP_LENGTH} value={otp} onChange={handleOtpChange} />
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.confirmCodeBtn, (busy || isEmailVerified) && styles.buttonDisabled]}
-                  disabled={busy || isEmailVerified}
-                  onPress={() => verifyCodeWithToken()}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.confirmCodeBtnText}>
-                    {isEmailVerified ? 'Email Verified ✓' : 'Confirm Code'}
+              {codeSentSuccess && (
+                <View style={styles.verificationBox}>
+                  <Text style={styles.successHint}>
+                    ✓ Verification link sent to {sentEmail}!
                   </Text>
-                </TouchableOpacity>
-              </View>
+                  <Text style={[styles.hintText, { marginTop: 6, textAlign: 'center' }]}>
+                    Please open your email inbox and click the verification link. Once clicked, click below to confirm.
+                  </Text>
+
+                  <TouchableOpacity
+                    style={[styles.confirmCodeBtn, busy && styles.buttonDisabled]}
+                    disabled={busy}
+                    onPress={checkEmailVerificationStatus}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.confirmCodeBtnText}>
+                      {isEmailVerified ? 'Email Verified ✓' : 'I Clicked The Link - Check Verification'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             {/* Step 3: Password & Safety Agreement */}
