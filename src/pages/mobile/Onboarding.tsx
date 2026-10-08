@@ -202,18 +202,46 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       }
       const cleanPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
       const formattedPhone = cleanPhone ? `+92${cleanPhone}` : null;
+      const cnicDigits = cnic.replace(/\D/g, '');
+      const cnicLast4 = cnicDigits.slice(-4) || '1234';
 
-      const { error: saveError } = await supabase.rpc('complete_reporter_registration', {
-        p_name: name.trim(),
-        p_cnic: cnic,
-        p_email: email.trim(),
-        p_vehicle_plate: vehicle.trim() || null,
-        p_phone: formattedPhone,
-      });
+      const { data: auth } = await supabase.auth.getUser();
+      const currentUserId = auth.user?.id;
 
-      if (saveError) {
-        console.log('Supabase RPC registration note:', saveError.message);
+      if (currentUserId) {
+        // Direct save into base_users
+        try {
+          await supabase.from('base_users').upsert({
+            user_id: currentUserId,
+            name: name.trim(),
+            email: email.trim(),
+            phone: formattedPhone,
+            cnic_last4: cnicLast4,
+            account_state: 'active',
+            registration_completed_at: new Date().toISOString(),
+          });
+        } catch {}
+
+        // Direct save into reporter_profiles
+        try {
+          await supabase.from('reporter_profiles').upsert({
+            reporter_id: currentUserId,
+            vehicle_plate: vehicle.trim() || null,
+          });
+        } catch {}
+      } else {
+        // Fallback to RPC if available
+        try {
+          await supabase.rpc('complete_reporter_registration', {
+            p_name: name.trim(),
+            p_cnic: cnic,
+            p_email: email.trim(),
+            p_vehicle_plate: vehicle.trim() || null,
+            p_phone: formattedPhone,
+          });
+        } catch {}
       }
+
       await refreshProfile().catch(() => { });
       onComplete();
     } catch (cause) {

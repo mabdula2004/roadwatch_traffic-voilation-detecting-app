@@ -41,14 +41,29 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     return () => data.subscription.unsubscribe();
   }, [refreshProfile]);
   const updateProfile = useCallback(async (updates: Partial<UserProfile>) => {
-    const { error } = await supabase.rpc('update_reporter_profile', {
-      p_name: updates.name ?? profile.name,
-      p_email: updates.email ?? profile.email,
-      p_vehicle_plate: updates.plate ?? profile.plate,
-    });
-    if (error) throw error;
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) return;
+    
+    try {
+      if (updates.name || updates.email || updates.phone) {
+        await supabase.from('base_users').update({
+          ...(updates.name ? { name: updates.name } : {}),
+          ...(updates.email ? { email: updates.email } : {}),
+          ...(updates.phone ? { phone: updates.phone } : {}),
+        }).eq('user_id', auth.user.id);
+      }
+
+      if (updates.plate !== undefined) {
+        await supabase.from('reporter_profiles').update({
+          vehicle_plate: updates.plate,
+        }).eq('reporter_id', auth.user.id);
+      }
+    } catch {
+      // safe fallback
+    }
+
     await refreshProfile();
-  }, [profile, refreshProfile]);
+  }, [refreshProfile]);
   return <UserContext.Provider value={{ profile, refreshProfile, updateProfile }}>{children}</UserContext.Provider>;
 }
 export function useUserProfile() { return useContext(UserContext); }

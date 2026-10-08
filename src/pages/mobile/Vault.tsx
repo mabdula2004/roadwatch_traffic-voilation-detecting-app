@@ -23,21 +23,25 @@ export function Vault() {
   useEffect(() => {
     let alive = true;
     async function load() {
-      const { data, error } = await supabase.from('reports').select('report_id,claimed_class,captured_at,status,geo_lat,geo_long').order('captured_at', { ascending: false }).limit(100);
-      if (alive) {
-        if (error) {
-          // If RLS policy is strict or table is unreadable for unauthenticated role, fallback gracefully
-          console.log('Vault reports query note:', error.message);
-          setReports([]);
+      try {
+        const { data, error } = await supabase.from('reports').select('report_id,claimed_class,captured_at,status,geo_lat,geo_long').order('captured_at', { ascending: false }).limit(100);
+        if (alive) {
+          if (error) {
+            setReports([]);
+          } else {
+            setReports(data ?? []);
+          }
           setLoadError('');
-        } else {
-          setReports(data ?? []);
+        }
+      } catch {
+        if (alive) {
+          setReports([]);
           setLoadError('');
         }
       }
     }
-    void load(); const timer = setInterval(() => { void load(); }, 12000);
-    return () => { alive = false; clearInterval(timer); };
+    void load();
+    return () => { alive = false; };
   }, []);
   const pending = reports.filter(r => r.status === 'awaiting_upload' || r.status === 'failed');
   const sealed = reports.filter(r => !pending.includes(r));
