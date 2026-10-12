@@ -38,10 +38,12 @@ export interface AiEvidentiaryResult {
   locationName?: string;
   framesBase64?: string[];
   isRateLimited?: boolean;
+  violationFrameIndex?: number; // 1, 2, or 3 (typically Frame 2)
+  frameDescriptions?: string[]; // Explanatory breakdown of why each frame proves or monitors the violation
 }
 
-const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
-const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen2.5-vl-72b-instruct';
+const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
+const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen3-vl-8b-instruct';
 
 const VIOLATION_LIST_PROMPT = VIOLATION_TAXONOMY.map(v => `- ${v.code} (${v.name}): ${v.description}`).join('\n');
 
@@ -82,31 +84,31 @@ async function readImageUriAsBase64(uri: string): Promise<string | null> {
 }
 
 /**
- * Extracts 6 representative JPEG frames across the video duration for high AI accuracy
+ * Extracts 3 representative JPEG frames across the video duration (token-optimized)
  */
 async function extractVideoFrames(videoUri?: string, durationMs: number = 5000): Promise<string[]> {
   if (!videoUri) return [];
   const frames: string[] = [];
   try {
     // Brief settle time so media encoder has finalized video file descriptor on Android
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, 200));
 
     const dur = Math.max(durationMs, 5000);
-    // Sample 6 frames across the clip: 12%, 28%, 44%, 60%, 76%, 90%
+    // Sample 3 key evidentiary frames focused specifically on the violation sequence:
+    // Frame 1 (30%): Approach & vehicle baseline positioning
+    // Frame 2 (55%): The decisive violation moment (critical point of infraction)
+    // Frame 3 (80%): Vehicle license plate identification and departure
     const times = [
-      Math.max(400, Math.floor(dur * 0.12)),
-      Math.max(1200, Math.floor(dur * 0.28)),
-      Math.max(2000, Math.floor(dur * 0.44)),
-      Math.max(2800, Math.floor(dur * 0.60)),
-      Math.max(3600, Math.floor(dur * 0.76)),
-      Math.max(4400, Math.floor(dur * 0.90)),
+      Math.max(600, Math.floor(dur * 0.30)),
+      Math.max(2200, Math.floor(dur * 0.55)),
+      Math.max(3800, Math.floor(dur * 0.80)),
     ];
 
     for (const time of times) {
       try {
         const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
           time,
-          quality: 0.6,
+          quality: 0.35,
         });
         if (uri) {
           const b64 = await readImageUriAsBase64(uri);
@@ -162,11 +164,11 @@ export async function analyzeTrafficViolation(params: {
     } catch {}
   }
 
-  // Extract up to 6 real video frames for Qwen2.5-VL to inspect
+  // Extract up to 3 real video frames for Qwen2.5-VL to inspect (token-optimized)
   const extracted = await extractVideoFrames(params.videoUri, params.durationMs || 5000);
   const frames = [...(params.framesBase64 || []), ...extracted]
     .filter(b => typeof b === 'string' && b.length > 50)
-    .slice(0, 6);
+    .slice(0, 3);
 
   if (frames.length === 0) {
     return {
@@ -195,10 +197,10 @@ export async function analyzeTrafficViolation(params: {
     };
   }
 
-  const prompt = `You are RoadWatch AI powered by Qwen2.5-VL-72B Instruct, a strict evidentiary traffic-violation enforcement vision system.
-You are reviewing ${frames.length} frames sampled across a citizen's traffic recording in chronological order.
+  const prompt = `You are RoadWatch AI powered by Qwen2.5-VL, a strict evidentiary traffic-violation vision system.
+You are reviewing ${frames.length} sampled frames across a citizen's traffic recording in chronological order.
 
-YOUR PRIMARY MISSION: TRAFFIC VIOLATION ENFORCEMENT AUDIT (§15 EVIDENTIARY PRD).
+YOUR PRIMARY MISSION: TRAFFIC VIOLATION ENFORCEMENT AUDIT (SECTION 15 EVIDENTIARY PRD).
 Determine whether an actionable traffic violation occurred with legal evidentiary certainty, or whether the case must be closed as compliant, blurred, or low-clarity.
 
 TAXONOMY OF RECOGNIZED VIOLATIONS:
@@ -208,53 +210,32 @@ STRICT EVIDENTIARY & ANTI-HALLUCINATION RULES:
 
 1. ZERO-GUESSING LICENSE PLATE POLICY:
    - NEVER guess, approximate, or extrapolate license plate numbers or characters under any circumstance.
-   - Every single character (letters and digits) must be 100% sharp, high-contrast, and unmistakably distinct across the frames.
-   - If the license plate is distant, pixelated, motion-blurred, in shadow, or if even a single character is doubtful (e.g. 8 vs B, 0 vs D, 3 vs 8, 5 vs 6):
-     * Set "plate_number": null
-     * Set "plate_status": "blurred"
-     * Set "plate_confidence": 0.0
-     * If a violation occurred, set "rejection_reason": "plate_blurred". An automated citation CANNOT be issued if the license plate cannot be authenticated with legal certainty!
+   - Every single character must be 100% sharp and distinct across frames.
+   - If distant, pixelated, motion-blurred, or shadowed: set "plate_number": null, "plate_status": "blurred", "plate_confidence": 0.0, "rejection_reason": "plate_blurred".
 
-2. MULTI-VEHICLE ISOLATION & ATTRIBUTION RULE (CRITICAL):
-   - When multiple vehicles appear in the video (e.g. multiple cars, bikes, rickshaws side-by-side):
-     * If ONE vehicle commits a violation (e.g. motorcycle running red light or riding without helmet, or specific car crossing stop line):
-       - STRICTLY ISOLATE THE VIOLATING VEHICLE.
-       - "vehicle_type", "vehicle_make_model", "vehicle_color", and "plate_number" MUST EXCLUSIVELY BE THOSE OF THE SPECIFIC VIOLATING VEHICLE.
-       - COMPLETELY SKIP and ignore all surrounding innocent/compliant vehicles in the output fields. Do NOT mix up the color, make, or plate of an innocent car with the violator!
-       - In "reasoning", state clearly: "Among multiple vehicles in the traffic scene, only the [violating vehicle, e.g. Black Motorcycle] committed a [violation type]. Other vehicles were compliant and are excluded."
-     * If NO vehicle commits a violation and all are driving or stopped legally:
-       - Set "violation_detected": false, "violation_type": null, "rejection_reason": "no_violation".
-       - Set "plate_number": null (Do NOT guess or record plates of innocent, compliant vehicles).
-       - In "reasoning", state: "Vehicles observed complying with traffic rules (e.g. stopped at red light). No traffic violation detected."
+2. MULTI-VEHICLE ISOLATION & ATTRIBUTION RULE:
+   - If ONE vehicle commits a violation: STRICTLY ISOLATE THE VIOLATING VEHICLE. Output fields must exclusively match the violating vehicle. Ignore surrounding compliant vehicles.
+   - If NO vehicle commits a violation: Set "violation_detected": false, "violation_type": null, "rejection_reason": "no_violation", "plate_number": null.
 
-3. FOOTAGE CLARITY & LOW QUALITY RESTRICTION:
-   - If the video is blurry, pixelated, shaky, dark, filmed through a dirty windshield, or camera is too far away:
-     * Set "clarity_score": number below 0.50 (e.g. 0.35 - 0.45).
-     * Set "rejection_reason": "low_clarity".
-     * Set "plate_number": null.
-     * In "reasoning", state clearly: "Video footage clarity is too low/blurry (< 50%) for verifiable analysis. Cannot determine violation or plate without guessing."
+3. FOOTAGE CLARITY & SCALE:
+   - If blurry/dark/unclear: "clarity_score": < 0.50, "rejection_reason": "low_clarity", "plate_number": null.
+   - If target vehicle is too far away (> 25-30m): "vehicle_distance": "too_far", "rejection_reason": "vehicle_too_far".
 
-4. VEHICLE DISTANCE & SCALE:
-   - If target vehicle is too far away (> 25-30m) or occupies less than 15% of frame height:
-     * Set "vehicle_distance": "too_far".
-     * Set "rejection_reason": "vehicle_too_far".
-     * Set "violation_detected": false.
-     * In "reasoning", state: "Vehicle is too far for verifiable evidentiary detection."
+4. SPECIFIC VIOLATIONS:
+   - "red_light_running": signal is red AND vehicle actively crosses stop line into intersection.
+   - "helmet_violation": motorcycle rider/passenger without safety helmet on public road.
 
-5. RED LIGHT & STOP-LINE VERIFICATION:
-   - To confirm "red_light_running", the camera must clearly show the signal light is RED AND the vehicle actively crossing over the stop line into the intersection while the light is red.
-   - If vehicles are stopped behind the stop line waiting for the signal to change (even if the light is red or yellow), they are COMPLIANT. Set "violation_detected": false, "rejection_reason": "no_violation".
-
-6. HELMET VIOLATION VERIFICATION:
-   - To confirm "helmet_violation", a motorcycle rider or passenger must be clearly seen riding without a safety helmet on a public road.
-
-7. EXEMPTIONS:
-   - Emergency vehicles (ambulances with beacons, police) or yielding to an emergency vehicle: set "violation_detected": false, "rejection_reason": "emergency_exemption".
+5. EVIDENTIARY 3-FRAME SEQUENCE:
+   - Identify which frame (1, 2, or 3) decisively shows the violation (typically Frame 2).
+   - Set "violation_frame_index": 1, 2, or 3.
+   - Provide "frame_descriptions": 3 concise strings explaining what each frame visually proves.
 
 Respond ONLY with a single JSON object (no markdown, no backticks):
 {
   "violation_detected": true or false,
   "violation_type": string or null,
+  "violation_frame_index": 1 | 2 | 3,
+  "frame_descriptions": ["description for Frame 1", "description for Frame 2", "description for Frame 3"],
   "vehicle_distance": "optimal" | "too_far" | "too_close",
   "plate_status": "clear" | "blurred" | "too_far" | "obscured" | "missing",
   "plate_number": string or null,
@@ -278,9 +259,28 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
     });
   }
 
-  // Call OpenRouter with multi-model fallback to avoid rate limits
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let isCreditLimitError = false;
+
+  // Verified vision models on OpenRouter (lightweight token usage to avoid 402/429)
+  const candidateModels = Array.from(new Set([
+    AI_MODEL,
+    'qwen/qwen3-vl-8b-instruct',
+    'qwen/qwen3-vl-30b-a3b-instruct',
+  ]));
+
+  for (let attempt = 0; attempt < candidateModels.length; attempt++) {
     try {
+      const modelToUse = candidateModels[attempt];
+      // On retry if previous attempt hit token or rate limit, use the 2 decisive violation frames
+      let effectiveContent = userContent;
+      if (attempt > 0 && frames.length > 2) {
+        effectiveContent = [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[0]}` } },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[1]}` } },
+        ];
+      }
+
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -290,8 +290,8 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: AI_MODEL,
-          messages: [{ role: 'user', content: userContent }],
+          model: modelToUse,
+          messages: [{ role: 'user', content: effectiveContent }],
           temperature: 0.1,
           max_tokens: 450,
         }),
@@ -299,8 +299,11 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
 
       if (!response.ok) {
         const errText = await response.text();
-        if (response.status === 429 && attempt === 0) {
-          await new Promise(res => setTimeout(res, 1500));
+        if (response.status === 402) {
+          isCreditLimitError = true;
+        }
+        if (attempt < candidateModels.length - 1) {
+          await new Promise(res => setTimeout(res, 800));
           continue;
         }
         throw new Error(`OpenRouter HTTP ${response.status}: ${errText}`);
@@ -313,20 +316,20 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
 
       return formatResult(caseId, parsed, params.claimedClass, locationName, frames);
     } catch (err: any) {
-      if (attempt === 0 && String(err).includes('429')) {
-        await new Promise(res => setTimeout(res, 1500));
+      if (attempt < candidateModels.length - 1) {
+        await new Promise(res => setTimeout(res, 800));
         continue;
       }
       console.log('Qwen AI API notice:', err);
     }
   }
 
-  // If rate-limited or congested, inform the user honestly
+  // If credit limit or rate limited, inform the user honestly
   return {
     caseId,
     violationDetected: false,
     violationType: null,
-    violationName: 'Pending Real AI Verification',
+    violationName: isCreditLimitError ? 'OpenRouter Credit Limit' : 'Pending Real AI Verification',
     vehicleDistance: 'optimal',
     plateStatus: 'blurred',
     plateNumber: null,
@@ -338,9 +341,11 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
     vehicleType: 'Unknown',
     fineAmountPkr: 0,
     status: 'no_violation',
-    statusLabel: 'AI Service Rate Limited (429)',
-    reasoning: 'Qwen 2.5-VL shared pool is temporarily rate-limited. Tap "Retry AI Analysis" below.',
-    notes: 'Upstream rate limit (429). No false citation was created.',
+    statusLabel: isCreditLimitError ? 'Credit Limit Exceeded (402)' : 'AI Service Rate Limited (429)',
+    reasoning: isCreditLimitError
+      ? 'OpenRouter account token budget limit reached. Please increase the key limit or top up credits at openrouter.ai.'
+      : 'Qwen 2.5-VL shared pool is temporarily congested. Tap "Retry AI Analysis" below.',
+    notes: isCreditLimitError ? 'HTTP 402: Prompt tokens limit exceeded.' : 'Upstream rate limit (429). No false citation was created.',
     analyzedAt: new Date().toISOString(),
     locationName,
     framesBase64: frames,
@@ -452,7 +457,7 @@ function formatResult(
     }
   }
 
-  // Evidentiary rules hierarchy from POC PRD §15
+  // Evidentiary rules hierarchy from POC PRD Section 15
   let status: CaseOutcomeStatus = 'fined';
   let statusLabel = 'Fine Issued & Citation Sealed';
 
@@ -490,6 +495,24 @@ function formatResult(
     ? Math.max(85, Math.round(Number(parsed.plate_confidence ?? 0.95) * 100))
     : 0;
 
+  // Frame sequence attribution: Determine the decisive violation frame (defaults to Frame 2)
+  const violationFrameIndex = Number(parsed.violation_frame_index) >= 1 && Number(parsed.violation_frame_index) <= 3
+    ? Number(parsed.violation_frame_index)
+    : (status === 'fined' ? 2 : 1);
+
+  let frameDescriptions: string[] = [];
+  if (Array.isArray(parsed.frame_descriptions) && parsed.frame_descriptions.length === 3) {
+    frameDescriptions = parsed.frame_descriptions.map(String);
+  } else {
+    frameDescriptions = [
+      'Frame 1: Approach & Initial Road Positioning',
+      status === 'fined'
+        ? `Frame 2: ⚡ VIOLATION MOMENT - ${violationMeta?.name || 'Critical Infraction Observed'}`
+        : 'Frame 2: Lawful Trajectory (No Violation Observed)',
+      'Frame 3: Vehicle Trajectory & License Plate Identification',
+    ];
+  }
+
   return {
     caseId,
     violationDetected: status === 'fined',
@@ -518,5 +541,7 @@ function formatResult(
     analyzedAt: new Date().toISOString(),
     locationName,
     framesBase64,
+    violationFrameIndex,
+    frameDescriptions,
   };
 }

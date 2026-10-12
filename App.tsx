@@ -28,6 +28,7 @@ function MainApp() {
   const [activeScreen, setActiveScreen] = useState<string>('capture');
   const [clip, setClip] = useState<CapturedClip | null>(null);
   const [latestOutcome, setLatestOutcome] = useState<AiEvidentiaryResult | null>(null);
+  const [latestReportId, setLatestReportId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -75,8 +76,9 @@ function MainApp() {
         {activeScreen === 'review' && clip && (
           <ReportReview
             clip={clip}
-            onBack={() => { setClip(null); setActiveScreen('capture'); }}
-            onSubmit={(_id, aiResult) => {
+            onBack={() => { setClip(null); setLatestReportId(null); setActiveScreen('capture'); }}
+            onSubmit={(id, aiResult) => {
+              setLatestReportId(id);
               setLatestOutcome(aiResult);
               setActiveScreen('outcome');
             }}
@@ -87,19 +89,23 @@ function MainApp() {
           <ReportOutcome
             clip={clip}
             aiResult={latestOutcome}
+            reportId={latestReportId || undefined}
             onGoToVault={() => {
               setClip(null);
               setLatestOutcome(null);
+              setLatestReportId(null);
               setActiveScreen('vault');
             }}
             onRecordAnother={() => {
               setClip(null);
               setLatestOutcome(null);
+              setLatestReportId(null);
               setActiveScreen('capture');
             }}
             onGoToWallet={() => {
               setClip(null);
               setLatestOutcome(null);
+              setLatestReportId(null);
               setActiveScreen('wallet');
             }}
           />

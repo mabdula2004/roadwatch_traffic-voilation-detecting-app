@@ -132,10 +132,47 @@ export async function getWalletBalance(): Promise<WalletState> {
   };
 }
 
+export interface WalletTransaction {
+  id: string;
+  type: 'reward' | 'penalty_fine' | 'manual_review_fee' | 'review_refund_bonus' | 'top_up';
+  amount: number; // positive for credit (+), negative for debit (-)
+  title: string;
+  subtitle: string;
+  timestamp: string;
+  reportId?: string;
+  locationName?: string;
+  reason?: string;
+}
+
+const LOCAL_TRANSACTIONS_KEY = '@roadwatch_citizen_wallet_transactions';
+
+export async function getStoredTransactions(): Promise<WalletTransaction[]> {
+  try {
+    const raw = await AsyncStorage.getItem(LOCAL_TRANSACTIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function recordWalletTransaction(tx: WalletTransaction): Promise<void> {
+  try {
+    const list = await getStoredTransactions();
+    const filtered = list.filter(t => t.id !== tx.id);
+    filtered.unshift(tx);
+    await AsyncStorage.setItem(LOCAL_TRANSACTIONS_KEY, JSON.stringify(filtered.slice(0, 100)));
+  } catch (e) {
+    console.warn('Failed to record wallet transaction:', e);
+  }
+}
+
 /**
- * Deducts a specified fee (e.g. PKR 100 for manual review) from the citizen wallet
+ * Deducts a specified fee (e.g. PKR 100 for manual review, PKR 50 for false report) from the citizen wallet
  */
-export async function deductWalletBalance(amount: number): Promise<{ success: boolean; newBalance: number; error?: string }> {
+export async function deductWalletBalance(
+  amount: number,
+  meta?: { title?: string; subtitle?: string; reportId?: string; type?: WalletTransaction['type'] }
+): Promise<{ success: boolean; newBalance: number; error?: string }> {
   const current = await getWalletBalance();
   if (current.balance < amount) {
     return {
@@ -155,13 +192,29 @@ export async function deductWalletBalance(amount: number): Promise<{ success: bo
   // 2. Synchronize to Supabase in background (single debounced call)
   void syncBalanceToSupabase(newBalance);
 
+  // 3. Record transaction log
+  try {
+    await recordWalletTransaction({
+      id: `TX-DED-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
+      type: meta?.type || (amount === 50 ? 'penalty_fine' : 'manual_review_fee'),
+      amount: -amount,
+      title: meta?.title || (amount === 50 ? 'Invalid Report Submission Penalty' : 'Warden Review Fee'),
+      subtitle: meta?.subtitle || (amount === 50 ? 'Automated penalty for invalid video report' : 'Case submitted for manual traffic warden audit'),
+      timestamp: new Date().toISOString(),
+      reportId: meta?.reportId,
+    });
+  } catch {}
+
   return { success: true, newBalance };
 }
 
 /**
- * Top up / Recharge the citizen wallet balance (for testing or adding funds)
+ * Top up / Recharge the citizen wallet balance (for testing or adding funds or rewards)
  */
-export async function rechargeWalletBalance(amount: number): Promise<{ success: boolean; newBalance: number }> {
+export async function rechargeWalletBalance(
+  amount: number,
+  meta?: { title?: string; subtitle?: string; reportId?: string; type?: WalletTransaction['type'] }
+): Promise<{ success: boolean; newBalance: number }> {
   const current = await getWalletBalance();
   const newBalance = current.balance + amount;
 
@@ -172,6 +225,19 @@ export async function rechargeWalletBalance(amount: number): Promise<{ success: 
 
   // 2. Synchronize to Supabase in background (single debounced call)
   void syncBalanceToSupabase(newBalance);
+
+  // 3. Record transaction log
+  try {
+    await recordWalletTransaction({
+      id: `TX-REC-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
+      type: meta?.type || (amount === 200 ? 'reward' : amount === 300 ? 'review_refund_bonus' : 'top_up'),
+      amount: amount,
+      title: meta?.title || (amount === 200 ? 'Citizen Bounty Reward' : amount === 300 ? 'Officer Review Payout (Refund + Reward)' : 'Wallet Top-Up (ePay)'),
+      subtitle: meta?.subtitle || (amount === 200 ? 'Verified violation reward prize' : 'Balance credit via connected ePay account'),
+      timestamp: new Date().toISOString(),
+      reportId: meta?.reportId,
+    });
+  } catch {}
 
   return { success: true, newBalance };
 }

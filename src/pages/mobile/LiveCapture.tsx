@@ -171,13 +171,8 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
           </View>
         </View>
 
-        {/* Plate detection scanning reticle */}
+        {/* Status badge */}
         <View style={styles.scanArea}>
-          <View style={styles.reticle}>
-            <View style={styles.reticleTag}>
-              <Text style={styles.reticleTagText}>{t('frameGuide')}</Text>
-            </View>
-          </View>
           <View style={[styles.scanBadge, recording && styles.scanBadgeRecording]}>
             <Scan size={14} color={recording ? (recordingDurationSec >= 5 ? Colors.valid : Colors.signal) : Colors.telemetry} />
             <Text style={[styles.scanText, recording && styles.scanTextRecording]}>
@@ -320,28 +315,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reticle: {
-    width: '65%',
-    height: 100,
-    borderWidth: 1.5,
-    borderColor: Colors.telemetry,
-    borderRadius: 12,
-    position: 'relative',
-    backgroundColor: 'rgba(6, 182, 212, 0.05)',
-  },
-  reticleTag: {
-    position: 'absolute',
-    top: -10,
-    left: 12,
-    backgroundColor: Colors.canvas,
-    paddingHorizontal: 6,
-    borderRadius: 4,
-  },
-  reticleTagText: {
-    color: Colors.telemetry,
-    fontSize: 9,
-    fontWeight: 'bold',
-  },
   scanBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -351,7 +324,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(6, 182, 212, 0.5)',
-    marginTop: 12,
     gap: 6,
   },
   scanBadgeRecording: {

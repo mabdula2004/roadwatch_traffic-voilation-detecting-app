@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   ShieldAlert,
   ShieldCheck,
   Car,
@@ -35,12 +36,13 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Colors } from '../../constants/theme';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
-import { CapturedClip, updateReportStatus } from '../../lib/report';
+import { CapturedClip, updateReportStatus, saveLocalReport, getLocalReports, saveFramesToDisk } from '../../lib/report';
 import { getWalletBalance, deductWalletBalance, rechargeWalletBalance } from '../../lib/wallet';
 
 interface ReportOutcomeProps {
   clip: CapturedClip;
   aiResult: AiEvidentiaryResult;
+  reportId?: string;
   onGoToVault: () => void;
   onRecordAnother: () => void;
   onGoToWallet?: () => void;
@@ -49,6 +51,7 @@ interface ReportOutcomeProps {
 export function ReportOutcome({
   clip,
   aiResult,
+  reportId,
   onGoToVault,
   onRecordAnother,
   onGoToWallet,
@@ -128,12 +131,44 @@ export function ReportOutcome({
     if (processingDeduction) return;
     setProcessingDeduction(true);
     try {
-      const res = await deductWalletBalance(100);
+      const effectiveId = reportId || aiResult.caseId;
+      const res = await deductWalletBalance(100, {
+        title: isUrdu ? 'ٹریفک وارڈن ریویو فیس' : 'Traffic Warden Review Fee',
+        subtitle: isUrdu ? `کیس ${effectiveId} برائے دستی جائزہ` : `Escalated case ${effectiveId} for warden audit`,
+        reportId: effectiveId,
+        type: 'manual_review_fee',
+      });
       if (res.success) {
         setWalletBalance(res.newBalance);
         setIsManualSubmitted(true);
         setShowConfirmModal(false);
-        await updateReportStatus(aiResult.caseId, 'pending_manual_review');
+
+        // 1. Update report status if exists by effective ID and clientCaptureId
+        const frameUris = await saveFramesToDisk(effectiveId, aiResult.framesBase64 || clip.framesBase64);
+        await updateReportStatus(effectiveId, 'under_review', clip.clientCaptureId, { frameUris, aiResult });
+
+        // 2. Guarantee it exists in local vault even if previous upload had failed
+        const localList = await getLocalReports();
+        const exists = localList.some(r => r.reportId === effectiveId || r.reportId === aiResult.caseId || r.clientCaptureId === clip.clientCaptureId);
+        if (!exists) {
+          await saveLocalReport({
+            reportId: effectiveId,
+            clientCaptureId: clip.clientCaptureId,
+            claimedClass: 'auto_ai_detect',
+            capturedAt: clip.capturedAt,
+            uploadedAt: new Date().toISOString(),
+            latitude: clip.latitude,
+            longitude: clip.longitude,
+            locationName: clip.locationName,
+            accuracy: clip.accuracy,
+            status: 'under_review',
+            aiResult,
+            penaltyPkr: 50,
+            penaltyRefunded: true,
+            frameUris,
+          });
+        }
+
         setShowSuccessModal(true);
       } else {
         setWalletBalance(res.newBalance);
@@ -166,7 +201,7 @@ export function ReportOutcome({
       {/* Top Header */}
       <View style={[styles.header, { borderBottomColor: colors.edge }]}>
         <View>
-          <Text style={[styles.headerPre, { color: colors.telemetry }]}>POC EVIDENTIARY AUDIT §15</Text>
+          <Text style={[styles.headerPre, { color: colors.telemetry }]}>POC EVIDENTIARY AUDIT (SEC 15)</Text>
           <Text style={[styles.headerTitle, { color: colors.ink }]}>Case Verification Result</Text>
         </View>
         <View style={[styles.badgePill, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
@@ -210,15 +245,33 @@ export function ReportOutcome({
           </View>
 
           {isFined && !isManualSubmitted && (
-            <View style={[styles.fineBox, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
-              <View>
-                <Text style={[styles.fineLabel, { color: colors.muted }]}>MANDATED CITATION FINE</Text>
-                <Text style={[styles.fineValue, { color: colors.ink }]}>PKR {aiResult.fineAmountPkr.toLocaleString()}</Text>
+            <>
+              <View style={[styles.fineBox, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+                <View>
+                  <Text style={[styles.fineLabel, { color: colors.muted }]}>MANDATED CITATION FINE</Text>
+                  <Text style={[styles.fineValue, { color: colors.ink }]}>PKR {aiResult.fineAmountPkr.toLocaleString()}</Text>
+                </View>
+                <View style={[styles.enforcePill, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                  <Scale size={14} color="#10b981" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>SEALED</Text>
+                </View>
               </View>
-              <View style={[styles.enforcePill, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Scale size={14} color="#10b981" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>SEALED</Text>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, padding: 8, backgroundColor: 'rgba(16, 185, 129, 0.12)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)' }}>
+                <Sparkles size={14} color="#10b981" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
+                  {isUrdu ? 'رپورٹ منظور! +200 روپے انعام والیٹ میں شامل کر دیا گیا' : 'Report Accepted! +PKR 200 Reward Prize Credited to Wallet'}
+                </Text>
               </View>
+            </>
+          )}
+
+          {!isFined && !isManualSubmitted && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, padding: 8, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.25)' }}>
+              <AlertTriangle size={14} color="#ef4444" />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#ef4444', flex: 1 }}>
+                {isUrdu ? 'رپورٹ مسترد! -50 روپے غلط اطلاع جرمانہ لاگو (مینوئل ریویو کروائیں یا والٹ چیک کریں)' : 'Report Rejected! -PKR 50 Penalty Charged for Invalid Report (Dispute below)'}
+              </Text>
             </View>
           )}
         </View>
@@ -273,11 +326,26 @@ export function ReportOutcome({
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.framesScrollContainer}>
               {frames.map((frameB64, idx) => {
-                const timePct = Math.round(((idx + 1) / frames.length) * 100);
+                const isVioMoment = aiResult.violationDetected && idx === ((aiResult.violationFrameIndex ?? 2) - 1);
+                const timePct = idx === 0 ? 30 : idx === 1 ? 55 : 80;
+                const customDesc = aiResult.frameDescriptions?.[idx];
+                const phaseLabel = isVioMoment
+                  ? (isUrdu ? '⚡ خلاف ورزی کا لمحہ' : '⚡ VIOLATION MOMENT')
+                  : idx === 0
+                  ? (isUrdu ? 'اپروچ اور پوزیشن' : 'Approach')
+                  : (isUrdu ? 'پلیٹ و حتمی ثبوت' : 'Plate Track');
+
                 return (
                   <TouchableOpacity
                     key={idx}
-                    style={[styles.frameCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}
+                    style={[
+                      styles.frameCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: isVioMoment ? '#ef4444' : colors.edge,
+                        borderWidth: isVioMoment ? 2 : 1,
+                      },
+                    ]}
                     activeOpacity={0.85}
                     onPress={() => setSelectedZoomFrame({ b64: frameB64, index: idx + 1, pct: timePct })}
                   >
@@ -287,16 +355,49 @@ export function ReportOutcome({
                       resizeMode="cover"
                     />
                     <View style={styles.frameBadgeRow}>
-                      <View style={styles.frameIndexPill}>
-                        <Text style={styles.frameIndexText}>Frame {idx + 1}</Text>
+                      <View
+                        style={[
+                          styles.frameIndexPill,
+                          isVioMoment && { backgroundColor: '#ef4444' },
+                        ]}
+                      >
+                        <Text style={styles.frameIndexText}>
+                          {isVioMoment ? '⚡ Frame ' + (idx + 1) + ' · VIOLATION' : 'Frame ' + (idx + 1)}
+                        </Text>
                       </View>
                       <View style={styles.frameZoomBtn}>
                         <Maximize2 size={10} color="#fff" />
                       </View>
                     </View>
                     <View style={styles.frameFooter}>
-                      <Clock size={10} color={colors.muted} />
-                      <Text style={[styles.frameFooterText, { color: colors.muted }]}>{timePct}% timeline</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Clock size={10} color={colors.muted} />
+                        <Text style={[styles.frameFooterText, { color: colors.muted }]}>{timePct}% timeline</Text>
+                      </View>
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: '700',
+                          color: isVioMoment ? '#ef4444' : colors.ink,
+                          marginTop: 2,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {phaseLabel}
+                      </Text>
+                      {customDesc ? (
+                        <Text
+                          style={{
+                            fontSize: 9,
+                            color: isVioMoment ? colors.ink : colors.muted,
+                            marginTop: 1,
+                            lineHeight: 12,
+                          }}
+                          numberOfLines={2}
+                        >
+                          {customDesc}
+                        </Text>
+                      ) : null}
                     </View>
                   </TouchableOpacity>
                 );
@@ -540,7 +641,9 @@ export function ReportOutcome({
             </View>
 
             <Text style={[styles.dialogPolicyText, { color: colors.muted }]}>
-              Note: A certified traffic warden will verify the 6 video frames within 24-48 hours. If violation is confirmed, your PKR 100 is refunded + bounty rewarded.
+              {isUrdu
+                ? 'ریویو پالیسی:\n• اگر افسر نے خلاف ورزی کی تصدیق کی: 100 روپے فیس واپس + 200 روپے انعام (کل 300 روپے والیٹ میں ملیں گے)!\n• اگر خلاف ورزی ثابت نہ ہوئی: 100 روپے فیس ضبط ہو گی۔'
+                : 'Review Policy:\n• If officer confirms violation: 100% Fee Refund (PKR 100) + Prize Bonus (PKR 200) = Total PKR 300 credited to wallet!\n• If officer rejects claim: PKR 100 review fee is forfeited.'}
             </Text>
 
             <View style={styles.dialogBtnRow}>
@@ -644,6 +747,10 @@ export function ReportOutcome({
                 <Text style={[styles.successDetailVal, { color: '#10b981' }]}>PKR {walletBalance.toLocaleString()}</Text>
               </View>
               <View style={styles.successDetailRow}>
+                <Text style={[styles.successDetailKey, { color: colors.muted }]}>If Confirmed by Officer:</Text>
+                <Text style={[styles.successDetailVal, { color: '#10b981', fontWeight: '700' }]}>+PKR 300 (Fee + Bonus)</Text>
+              </View>
+              <View style={styles.successDetailRow}>
                 <Text style={[styles.successDetailKey, { color: colors.muted }]}>Audit Resolution Time:</Text>
                 <Text style={[styles.successDetailVal, { color: colors.ink }]}>24 – 48 Hours</Text>
               </View>
@@ -651,9 +758,14 @@ export function ReportOutcome({
 
             <TouchableOpacity
               style={[styles.successDoneBtn, { backgroundColor: colors.telemetry }]}
-              onPress={() => setShowSuccessModal(false)}
+              onPress={() => {
+                setShowSuccessModal(false);
+                onGoToVault();
+              }}
             >
-              <Text style={styles.successDoneBtnText}>Acknowledge & Continue</Text>
+              <Text style={styles.successDoneBtnText}>
+                {isUrdu ? 'تسلیم کریں اور والٹ میں دیکھیں' : 'Acknowledge & View in Vault'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
