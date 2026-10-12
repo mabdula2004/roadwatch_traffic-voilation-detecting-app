@@ -42,6 +42,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         capturedAt: clip.capturedAt,
         latitude: clip.latitude,
         longitude: clip.longitude,
+        locationName: clip.locationName,
       });
 
       const id = await uploadReport(clip, 'auto_ai_detect', result);

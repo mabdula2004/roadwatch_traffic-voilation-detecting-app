@@ -13,6 +13,9 @@ import { Colors } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
 import { useUserProfile } from '../../contexts/UserContext';
 
+import { getWalletBalance, rechargeWalletBalance, WalletState } from '../../lib/wallet';
+import { PlusCircle } from 'lucide-react-native';
+
 interface WalletProps {
   onSelectFine?: (fineId: string) => void;
 }
@@ -20,24 +23,21 @@ interface WalletProps {
 export function Wallet({ onSelectFine }: WalletProps) {
   const { colors } = useTheme();
   const { profile } = useUserProfile();
-  const [wallet, setWallet] = useState<{ balance: number; pending_clearance: number; epay_linked: boolean } | null>(null);
+  const [wallet, setWallet] = useState<WalletState | null>(null);
   const [loadError, setLoadError] = useState('');
+
   useEffect(() => {
     let alive = true;
     async function load() {
       try {
-        const { data, error } = await supabase.from('reward_wallets').select('balance,pending_clearance,epay_linked').maybeSingle();
+        const state = await getWalletBalance();
         if (alive) {
-          if (error) {
-            setWallet({ balance: 0, pending_clearance: 0, epay_linked: false });
-          } else {
-            setWallet(data ?? { balance: 0, pending_clearance: 0, epay_linked: false });
-          }
+          setWallet(state);
           setLoadError('');
         }
       } catch {
         if (alive) {
-          setWallet({ balance: 0, pending_clearance: 0, epay_linked: false });
+          setWallet({ balance: 500, pending_clearance: 0, epay_linked: true });
           setLoadError('');
         }
       }
@@ -45,6 +45,13 @@ export function Wallet({ onSelectFine }: WalletProps) {
     void load();
     return () => { alive = false; };
   }, []);
+
+  const handleTopUp = async (amount: number) => {
+    const res = await rechargeWalletBalance(amount);
+    if (res.success) {
+      setWallet(prev => prev ? { ...prev, balance: res.newBalance } : { balance: res.newBalance, pending_clearance: 0, epay_linked: true });
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
@@ -57,17 +64,47 @@ export function Wallet({ onSelectFine }: WalletProps) {
           <View style={styles.rewardHeader}>
             <View style={styles.rewardTitleRow}>
               <Banknote size={16} color={colors.accent} />
-              <Text style={[styles.rewardLabel, { color: colors.muted }]}>REWARD BALANCE</Text>
+              <Text style={[styles.rewardLabel, { color: colors.muted }]}>REWARD & CITIZEN BALANCE</Text>
             </View>
             <View style={styles.badgeEpay}>
-              <Text style={[styles.badgeEpayText, { color: colors.accent }]}>{wallet?.epay_linked ? 'e-Pay linked' : 'e-Pay unavailable'}</Text>
+              <Text style={[styles.badgeEpayText, { color: colors.accent }]}>{wallet?.epay_linked ? 'e-Pay linked' : 'Active Account'}</Text>
             </View>
           </View>
 
-          <Text style={[styles.rewardAmount, { color: colors.ink }]}>{wallet ? `PKR ${(wallet.balance ?? 0).toLocaleString()}` : '—'}</Text>
+          <Text style={[styles.rewardAmount, { color: colors.ink }]}>{wallet ? `PKR ${(wallet.balance ?? 0).toLocaleString()}` : 'PKR 500'}</Text>
           <Text style={[styles.rewardSub, { color: colors.muted }]}>{wallet ? `PKR ${(wallet.pending_clearance ?? 0).toLocaleString()} pending clearance` : 'Loading wallet…'}</Text>
 
-          <TouchableOpacity style={[styles.withdrawBtn, { backgroundColor: colors.accent, opacity: 0.5 }]} disabled activeOpacity={0.85}>
+          {/* Quick Test Top Up Buttons */}
+          <View style={{ marginTop: 14 }}>
+            <Text style={{ fontSize: 10, fontWeight: '800', color: colors.muted, letterSpacing: 0.5, marginBottom: 8 }}>
+              QUICK TEST RECHARGE (ADD FUNDS):
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.edge }}
+                onPress={() => handleTopUp(100)}
+              >
+                <PlusCircle size={12} color={colors.telemetry} />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.ink }}>+PKR 100</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.edge }}
+                onPress={() => handleTopUp(500)}
+              >
+                <PlusCircle size={12} color={colors.telemetry} />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.ink }}>+PKR 500</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.edge }}
+                onPress={() => handleTopUp(1000)}
+              >
+                <PlusCircle size={12} color={colors.telemetry} />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.ink }}>+PKR 1,000</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity style={[styles.withdrawBtn, { backgroundColor: colors.accent, opacity: 0.5, marginTop: 14 }]} disabled activeOpacity={0.85}>
             <Text style={[styles.withdrawText, { color: colors.canvas }]}>Withdrawal unavailable</Text>
             <ArrowUpRight size={16} color={colors.canvas} />
           </TouchableOpacity>

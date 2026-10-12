@@ -1,8 +1,9 @@
 import { useTheme } from '../../contexts/ThemeContext';
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { ChevronLeft, KeyRound, Eye, EyeOff, CheckCircle2 } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
+import { supabase } from '../../lib/supabase';
 
 interface ChangePasswordProps {
   onBack: () => void;
@@ -17,67 +18,81 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-
-  const handleSubmit = () => Alert.alert('Phone OTP account', 'This account signs in using a one-time SMS code. Password changes are not enabled.');
+  const [loading, setLoading] = useState(false);
 
   const isMatched = newPassword.length > 0 && newPassword === confirmPassword;
 
+  const handleSubmit = async () => {
+    if (newPassword.length < 6) {
+      Alert.alert('Password Too Short', 'Password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Mismatch', 'New password and confirm password do not match.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (error) {
+        Alert.alert('Update Failed', error.message);
+        return;
+      }
+
+      Alert.alert(
+        'Password Updated',
+        'Your account password has been updated successfully.',
+        [{ text: 'OK', onPress: onBack }]
+      );
+    } catch (e) {
+      Alert.alert('Update Failed', e instanceof Error ? e.message : 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.canvas }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.canvas, borderBottomColor: colors.edge }]}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <ChevronLeft size={20} color={Colors.textMuted} />
-          <Text style={styles.backText}>Back to Settings</Text>
+          <ChevronLeft size={20} color={colors.muted} />
+          <Text style={[styles.backText, { color: colors.muted }]}>Back to Settings</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Change Password</Text>
+        <Text style={[styles.headerTitle, { color: colors.ink }]}>Change Password</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Security Banner */}
-        <View style={styles.securityBanner}>
+        <View style={[styles.securityBanner, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
           <View style={styles.keyCircle}>
-            <KeyRound size={20} color={Colors.accent} />
+            <KeyRound size={20} color={colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.bannerTitle}>Update Security Credentials</Text>
-            <Text style={styles.bannerSub}>This account currently uses verified phone OTP. Password changes are unavailable.</Text>
-          </View>
-        </View>
-
-        {/* Current Password */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Current Password</Text>
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.input}
-              secureTextEntry={!showCurrent}
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-              placeholder="••••••••••••"
-              placeholderTextColor={Colors.textMuted}
-            />
-            <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowCurrent(!showCurrent)}>
-              {showCurrent ? <EyeOff size={18} color={Colors.textMuted} /> : <Eye size={18} color={Colors.textMuted} />}
-            </TouchableOpacity>
+            <Text style={[styles.bannerTitle, { color: colors.ink }]}>Update Account Credentials</Text>
+            <Text style={[styles.bannerSub, { color: colors.muted }]}>Set a strong password of at least 6 characters to secure your citizen reporter account.</Text>
           </View>
         </View>
 
         {/* New Password */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>New Password</Text>
-          <View style={styles.inputWrapper}>
+          <Text style={[styles.label, { color: colors.ink }]}>New Password</Text>
+          <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { color: colors.ink }]}
               secureTextEntry={!showNew}
               value={newPassword}
               onChangeText={setNewPassword}
               placeholder="At least 6 characters"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.muted}
             />
             <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowNew(!showNew)}>
-              {showNew ? <EyeOff size={18} color={Colors.textMuted} /> : <Eye size={18} color={Colors.textMuted} />}
+              {showNew ? <EyeOff size={18} color={colors.muted} /> : <Eye size={18} color={colors.muted} />}
             </TouchableOpacity>
           </View>
         </View>
@@ -85,37 +100,43 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
         {/* Confirm Password */}
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
-            <Text style={styles.label}>Confirm New Password</Text>
+            <Text style={[styles.label, { color: colors.ink }]}>Confirm New Password</Text>
             {isMatched && (
               <View style={styles.matchGroup}>
-                <CheckCircle2 size={12} color={Colors.valid} />
-                <Text style={styles.matchText}>Passwords match</Text>
+                <CheckCircle2 size={12} color={colors.valid} />
+                <Text style={[styles.matchText, { color: colors.valid }]}>Passwords match</Text>
               </View>
             )}
           </View>
-          <View style={styles.inputWrapper}>
+          <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.edge }, isMatched && { borderColor: 'rgba(34, 197, 94, 0.6)' }]}>
             <TextInput
-              style={[styles.input, isMatched && { borderColor: 'rgba(34, 197, 94, 0.6)' }]}
+              style={[styles.input, { color: colors.ink }]}
               secureTextEntry={!showConfirm}
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               placeholder="Re-enter new password"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.muted}
             />
             <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowConfirm(!showConfirm)}>
-              {showConfirm ? <EyeOff size={18} color={Colors.textMuted} /> : <Eye size={18} color={Colors.textMuted} />}
+              {showConfirm ? <EyeOff size={18} color={colors.muted} /> : <Eye size={18} color={colors.muted} />}
             </TouchableOpacity>
           </View>
         </View>
 
-        <Text style={styles.note}>
-          This form is inactive because sign-in uses a verified SMS code.
-        </Text>
-
         {/* Submit */}
-        <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
-          <KeyRound size={18} color="#000" />
-          <Text style={styles.submitText}>Update Password</Text>
+        <TouchableOpacity
+          style={[styles.submitButton, { backgroundColor: colors.accent, opacity: loading ? 0.6 : 1 }]}
+          disabled={loading}
+          onPress={handleSubmit}
+        >
+          {loading ? (
+            <ActivityIndicator color="#000" size="small" />
+          ) : (
+            <>
+              <KeyRound size={18} color="#000" />
+              <Text style={styles.submitText}>Save New Password</Text>
+            </>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </View>

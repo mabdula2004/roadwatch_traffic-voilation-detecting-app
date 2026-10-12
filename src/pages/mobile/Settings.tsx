@@ -35,7 +35,7 @@ interface SettingsProps {
 }
 
 export function Settings({ onLogout, onNavigate }: SettingsProps) {
-  const { profile } = useUserProfile();
+  const { profile, refreshProfile } = useUserProfile();
   const { theme, setTheme, colors } = useTheme();
   const { language, setLanguage, t, isUrdu } = useLanguage();
 
@@ -43,6 +43,11 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [trustScore, setTrustScore] = useState<number>(100);
   const [stats, setStats] = useState({ approved: 0, rejected: 0 });
+
+  useEffect(() => {
+    void refreshProfile().catch(() => {});
+  }, [refreshProfile]);
+
   useEffect(() => {
     let alive = true;
     async function load() {
@@ -110,7 +115,9 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
   };
 
   const displayName = profile.name || 'RoadWatch Reporter';
-  const cnicDisplay = profile.cnic ? (profile.cnic.startsWith('•') ? profile.cnic : `CNIC ${profile.cnic}`) : 'CNIC Pending';
+  const rawCnicDigits = profile.cnic ? profile.cnic.replace(/\D/g, '') : '';
+  const cnicLast4 = rawCnicDigits ? rawCnicDigits.slice(-4) : (profile.cnic?.includes('•') ? profile.cnic.slice(-4) : '8899');
+  const cnicDisplay = `CNIC ••••••••${cnicLast4}`;
   const plateDisplay = profile.plate ? profile.plate : 'No Plate Registered';
 
   return (

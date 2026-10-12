@@ -154,7 +154,15 @@ create policy "Users can view own wallet" on public.reward_wallets
 
 drop policy if exists "Users can manage own wallet" on public.reward_wallets;
 create policy "Users can manage own wallet" on public.reward_wallets
-  for insert to authenticated with check ((select auth.uid()) = reporter_id);
+  for all to authenticated
+  using ((select auth.uid()) = reporter_id)
+  with check ((select auth.uid()) = reporter_id);
+
+drop policy if exists "Users can update own wallet" on public.reward_wallets;
+create policy "Users can update own wallet" on public.reward_wallets
+  for update to authenticated
+  using ((select auth.uid()) = reporter_id)
+  with check ((select auth.uid()) = reporter_id);
 
 -- Storage bucket policies
 drop policy if exists "Authenticated users can upload evidence" on storage.objects;

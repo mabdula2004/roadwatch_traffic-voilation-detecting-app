@@ -1,37 +1,48 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  Image,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   CheckCircle2,
   AlertCircle,
   ShieldAlert,
+  ShieldCheck,
   Car,
   MapPin,
   Clock,
   HardDrive,
   Camera,
-  Eye,
   Hash,
   Scale,
   Sparkles,
   ChevronRight,
+  Maximize2,
+  UserCheck,
+  Wallet,
+  PlusCircle,
+  X,
+  CreditCard,
 } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Colors } from '../../constants/theme';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
-import { CapturedClip } from '../../lib/report';
+import { CapturedClip, updateReportStatus } from '../../lib/report';
+import { getWalletBalance, deductWalletBalance, rechargeWalletBalance } from '../../lib/wallet';
 
 interface ReportOutcomeProps {
   clip: CapturedClip;
   aiResult: AiEvidentiaryResult;
   onGoToVault: () => void;
   onRecordAnother: () => void;
+  onGoToWallet?: () => void;
 }
 
 export function ReportOutcome({
@@ -39,31 +50,114 @@ export function ReportOutcome({
   aiResult,
   onGoToVault,
   onRecordAnother,
+  onGoToWallet,
 }: ReportOutcomeProps) {
   const { colors } = useTheme();
+
+  // Wallet & Manual Review State
+  const [walletBalance, setWalletBalance] = useState<number>(500);
+  const [selectedZoomFrame, setSelectedZoomFrame] = useState<{ b64: string; index: number; pct: number } | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [isManualSubmitted, setIsManualSubmitted] = useState(false);
+  const [processingDeduction, setProcessingDeduction] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    async function loadBalance() {
+      const state = await getWalletBalance();
+      if (alive) {
+        setWalletBalance(state.balance);
+      }
+    }
+    loadBalance();
+    return () => { alive = false; };
+  }, []);
 
   const isFined = aiResult.status === 'fined';
   const isPlateBlurred = aiResult.status === 'rejected_plate_blurred';
   const isVehicleTooFar = aiResult.status === 'rejected_vehicle_too_far';
   const isLowClarity = aiResult.status === 'auto_rejected_low_clarity';
 
-  const statusBg = isFined
+  const statusBg = isManualSubmitted
+    ? 'rgba(16, 185, 129, 0.12)'
+    : isFined
     ? 'rgba(16, 185, 129, 0.12)'
     : isPlateBlurred || isVehicleTooFar || isLowClarity
     ? 'rgba(245, 158, 11, 0.12)'
     : 'rgba(59, 130, 246, 0.12)';
 
-  const statusBorder = isFined
+  const statusBorder = isManualSubmitted
+    ? '#10b981'
+    : isFined
     ? '#10b981'
     : isPlateBlurred || isVehicleTooFar || isLowClarity
     ? '#f59e0b'
     : '#3b82f6';
 
-  const statusTextColor = isFined
+  const statusTextColor = isManualSubmitted
+    ? '#10b981'
+    : isFined
     ? '#10b981'
     : isPlateBlurred || isVehicleTooFar || isLowClarity
     ? '#f59e0b'
     : '#3b82f6';
+
+  const handleOpenManualReview = async () => {
+    try {
+      const state = await getWalletBalance();
+      setWalletBalance(state.balance);
+      if (state.balance >= 100) {
+        setShowConfirmModal(true);
+      } else {
+        setShowRechargeModal(true);
+      }
+    } catch {
+      if (walletBalance >= 100) {
+        setShowConfirmModal(true);
+      } else {
+        setShowRechargeModal(true);
+      }
+    }
+  };
+
+  const handleConfirmManualReview = async () => {
+    if (processingDeduction) return;
+    setProcessingDeduction(true);
+    try {
+      const res = await deductWalletBalance(100);
+      if (res.success) {
+        setWalletBalance(res.newBalance);
+        setIsManualSubmitted(true);
+        setShowConfirmModal(false);
+        await updateReportStatus(aiResult.caseId, 'pending_manual_review');
+        setShowSuccessModal(true);
+      } else {
+        setWalletBalance(res.newBalance);
+        setShowConfirmModal(false);
+        setShowRechargeModal(true);
+      }
+    } catch (e) {
+      console.log('Manual review deduction failed:', e);
+    } finally {
+      setProcessingDeduction(false);
+    }
+  };
+
+  const handleQuickRecharge = async (amount: number) => {
+    const res = await rechargeWalletBalance(amount);
+    if (res.success) {
+      setWalletBalance(res.newBalance);
+      setShowRechargeModal(false);
+      if (res.newBalance >= 100) {
+        setShowConfirmModal(true);
+      }
+    }
+  };
+
+  // Frames to show (either from aiResult or clip)
+  const frames = aiResult.framesBase64 || clip.framesBase64 || [];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.canvas }]}>
@@ -82,7 +176,9 @@ export function ReportOutcome({
         {/* Outcome Main Banner */}
         <View style={[styles.outcomeBanner, { backgroundColor: statusBg, borderColor: statusBorder }]}>
           <View style={styles.bannerRow}>
-            {isFined ? (
+            {isManualSubmitted ? (
+              <ShieldCheck size={24} color="#10b981" />
+            ) : isFined ? (
               <CheckCircle2 size={24} color="#10b981" />
             ) : isPlateBlurred || isVehicleTooFar || isLowClarity ? (
               <ShieldAlert size={24} color="#f59e0b" />
@@ -91,10 +187,14 @@ export function ReportOutcome({
             )}
             <View style={{ flex: 1 }}>
               <Text style={[styles.bannerTitle, { color: statusTextColor }]}>
-                {aiResult.statusLabel.toUpperCase()}
+                {isManualSubmitted
+                  ? 'CASE ESCALATED: PENDING MANUAL OFFICER REVIEW'
+                  : aiResult.statusLabel.toUpperCase()}
               </Text>
               <Text style={[styles.bannerSubtitle, { color: colors.ink }]}>
-                {isFined
+                {isManualSubmitted
+                  ? 'Evidence frames and video submitted for certified traffic officer manual audit. Fee of PKR 100 paid.'
+                  : isFined
                   ? `Automated citation sealed for ${aiResult.violationName}.`
                   : isPlateBlurred
                   ? 'Violation cannot be fined because license plate is blurred or illegible.'
@@ -107,7 +207,7 @@ export function ReportOutcome({
             </View>
           </View>
 
-          {isFined && (
+          {isFined && !isManualSubmitted && (
             <View style={[styles.fineBox, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
               <View>
                 <Text style={[styles.fineLabel, { color: colors.muted }]}>MANDATED CITATION FINE</Text>
@@ -157,6 +257,113 @@ export function ReportOutcome({
           </View>
         </View>
 
+        {/* 6 Analyzed Video Frames Gallery */}
+        {frames.length > 0 && (
+          <View style={{ marginTop: 18 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <Text style={[styles.sectionHeading, { color: colors.muted, marginBottom: 0 }]}>
+                ANALYZED VIDEO FRAMES ({frames.length} FRAMES INSPECTED)
+              </Text>
+              <Text style={{ fontSize: 11, color: colors.telemetry, fontWeight: '600' }}>
+                Tap to inspect
+              </Text>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.framesScrollContainer}>
+              {frames.map((frameB64, idx) => {
+                const timePct = Math.round(((idx + 1) / frames.length) * 100);
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.frameCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}
+                    activeOpacity={0.85}
+                    onPress={() => setSelectedZoomFrame({ b64: frameB64, index: idx + 1, pct: timePct })}
+                  >
+                    <Image
+                      source={{ uri: `data:image/jpeg;base64,${frameB64}` }}
+                      style={styles.frameThumbnail}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.frameBadgeRow}>
+                      <View style={styles.frameIndexPill}>
+                        <Text style={styles.frameIndexText}>Frame {idx + 1}</Text>
+                      </View>
+                      <View style={styles.frameZoomBtn}>
+                        <Maximize2 size={10} color="#fff" />
+                      </View>
+                    </View>
+                    <View style={styles.frameFooter}>
+                      <Clock size={10} color={colors.muted} />
+                      <Text style={[styles.frameFooterText, { color: colors.muted }]}>{timePct}% timeline</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Dispute / Manual Review Request Card (When Violation is NOT detected) */}
+        {!isFined && (
+          <View style={[styles.manualReviewCard, { backgroundColor: colors.surface, borderColor: isManualSubmitted ? '#10b981' : 'rgba(245, 158, 11, 0.4)' }]}>
+            <View style={styles.manualHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <ShieldAlert size={16} color={isManualSubmitted ? '#10b981' : '#f59e0b'} />
+                <Text style={[styles.manualReviewPre, { color: isManualSubmitted ? '#10b981' : '#f59e0b' }]}>
+                  {isManualSubmitted ? 'CASE ESCALATED' : 'OFFICER DISPUTE & AUDIT'}
+                </Text>
+              </View>
+              <View style={[styles.feePill, { backgroundColor: isManualSubmitted ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)' }]}>
+                <Text style={[styles.feePillText, { color: isManualSubmitted ? '#10b981' : '#f59e0b' }]}>
+                  {isManualSubmitted ? 'SUBMITTED' : 'FEE: PKR 100'}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.manualTitle, { color: colors.ink }]}>
+              {isManualSubmitted ? 'Submitted for Manual Traffic Review' : 'Dispute Verdict & Request Manual Review'}
+            </Text>
+
+            <Text style={[styles.manualDesc, { color: colors.muted }]}>
+              {isManualSubmitted
+                ? 'Your report is now in the Traffic Warden Audit Queue. A certified officer will inspect the 6 video frames and vehicle evidence within 24-48 hours.'
+                : 'If you believe the AI missed a traffic violation or misread road conditions, submit this clip and key frames to a certified traffic warden for legal manual audit.'}
+            </Text>
+
+            {/* Wallet balance telemetry */}
+            <View style={[styles.walletStatusRow, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Wallet size={14} color={colors.telemetry} />
+                <Text style={[styles.walletStatusLabel, { color: colors.muted }]}>Wallet Balance:</Text>
+                <Text style={[styles.walletStatusAmount, { color: colors.ink }]}>PKR {walletBalance.toLocaleString()}</Text>
+              </View>
+              <View style={[styles.balancePill, { backgroundColor: walletBalance >= 100 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }]}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: walletBalance >= 100 ? '#10b981' : '#ef4444' }}>
+                  {walletBalance >= 100 ? 'Sufficient' : 'Low Balance'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Action Button */}
+            {isManualSubmitted ? (
+              <View style={[styles.submittedSuccessBadge, { backgroundColor: 'rgba(16, 185, 129, 0.12)', borderColor: '#10b981' }]}>
+                <CheckCircle2 size={16} color="#10b981" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981' }}>Pending Officer Inspection (#{aiResult.caseId})</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.manualReviewBtn, { backgroundColor: '#f59e0b' }]}
+                activeOpacity={0.85}
+                onPress={handleOpenManualReview}
+              >
+                <UserCheck size={16} color="#000" />
+                <Text style={styles.manualReviewBtnText}>Request Manual Review (PKR 100)</Text>
+                <ChevronRight size={16} color="#000" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* Vehicle & Target Telemetry */}
         <Text style={[styles.sectionHeading, { color: colors.muted, marginTop: 18 }]}>VEHICLE & LOCATION TELEMETRY</Text>
         <View style={[styles.detailCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
@@ -166,9 +373,24 @@ export function ReportOutcome({
               <Hash size={16} color={colors.telemetry} />
               <Text style={[styles.detailKey, { color: colors.muted }]}>License Plate</Text>
             </View>
-            <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '700' }]}>
-              {aiResult.plateNumber ? `${aiResult.plateNumber} (${aiResult.plateConfidence}% conf)` : 'Unreadable / Blurred'}
-            </Text>
+            {aiResult.plateNumber ? (
+              <View style={{ alignItems: 'flex-end' }}>
+                <View style={[styles.platePill, { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10b981' }]}>
+                  <Text style={[styles.plateNumberText, { color: '#10b981' }]}>{aiResult.plateNumber}</Text>
+                </View>
+                <Text style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>{aiResult.plateConfidence}% confidence</Text>
+              </View>
+            ) : (
+              <Text style={[styles.detailVal, { color: colors.muted }]}>
+                {aiResult.status === 'no_violation'
+                  ? 'N/A (Compliant Traffic)'
+                  : aiResult.status === 'auto_rejected_low_clarity'
+                  ? 'Low Quality / Unreadable'
+                  : aiResult.status === 'rejected_vehicle_too_far'
+                  ? 'Vehicle Too Far'
+                  : 'Unreadable / Blurred'}
+              </Text>
+            )}
           </View>
 
           {/* Vehicle Make/Model */}
@@ -177,20 +399,33 @@ export function ReportOutcome({
               <Car size={16} color={colors.telemetry} />
               <Text style={[styles.detailKey, { color: colors.muted }]}>Vehicle Info</Text>
             </View>
-            <Text style={[styles.detailVal, { color: colors.ink }]}>
-              {aiResult.vehicleColor} {aiResult.vehicleMakeModel}
+            <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '600' }]}>
+              {aiResult.vehicleColor && aiResult.vehicleColor !== 'Unknown'
+                ? `${aiResult.vehicleColor} ${aiResult.vehicleMakeModel}`
+                : aiResult.vehicleMakeModel !== 'Not Identified'
+                ? aiResult.vehicleMakeModel
+                : aiResult.vehicleType !== 'Unknown'
+                ? aiResult.vehicleType
+                : 'Traffic Vehicle Identified'}
             </Text>
           </View>
 
-          {/* GPS Location */}
+          {/* GPS Location & Place */}
           <View style={styles.detailRow}>
             <View style={styles.detailLeft}>
               <MapPin size={16} color={colors.telemetry} />
-              <Text style={[styles.detailKey, { color: colors.muted }]}>GPS Location</Text>
+              <Text style={[styles.detailKey, { color: colors.muted }]}>Location</Text>
             </View>
-            <Text style={[styles.detailVal, { color: colors.ink }]}>
-              {clip.latitude.toFixed(5)}, {clip.longitude.toFixed(5)}
-            </Text>
+            <View style={{ alignItems: 'flex-end', flexShrink: 1, maxWidth: '65%' }}>
+              {(aiResult.locationName || clip.locationName) ? (
+                <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '700', textAlign: 'right' }]} numberOfLines={2}>
+                  {aiResult.locationName || clip.locationName}
+                </Text>
+              ) : null}
+              <Text style={{ fontSize: 11, color: colors.telemetry, textAlign: 'right', marginTop: 2, fontFamily: 'monospace' }}>
+                {clip.latitude.toFixed(5)}°, {clip.longitude.toFixed(5)}°
+              </Text>
+            </View>
           </View>
 
           {/* Timestamp */}
@@ -234,6 +469,193 @@ export function ReportOutcome({
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* MODAL 1: Full-Screen Zoom Frame Lightbox */}
+      <Modal visible={!!selectedZoomFrame} transparent animationType="fade" onRequestClose={() => setSelectedZoomFrame(null)}>
+        <View style={styles.modalBackdrop}>
+          <SafeAreaView style={styles.lightboxContainer}>
+            <View style={styles.lightboxHeader}>
+              <View>
+                <Text style={styles.lightboxTitle}>Frame {selectedZoomFrame?.index} of {frames.length}</Text>
+                <Text style={styles.lightboxSub}>Extracted at {selectedZoomFrame?.pct}% of video timeline</Text>
+              </View>
+              <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedZoomFrame(null)}>
+                <X size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedZoomFrame && (
+              <View style={styles.lightboxImageWrapper}>
+                <Image
+                  source={{ uri: `data:image/jpeg;base64,${selectedZoomFrame.b64}` }}
+                  style={styles.lightboxImage}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
+
+            <View style={styles.lightboxFooter}>
+              <Text style={styles.lightboxFooterText}>
+                Inspected by Qwen 2.5-VL Vision Model for license plate legibility and traffic compliance.
+              </Text>
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* MODAL 2: Confirm Manual Review Deduction Modal */}
+      <Modal visible={showConfirmModal} transparent animationType="slide" onRequestClose={() => setShowConfirmModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.dialogCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+            <View style={styles.dialogHeaderRow}>
+              <View style={[styles.dialogIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                <UserCheck size={24} color="#f59e0b" />
+              </View>
+              <TouchableOpacity onPress={() => setShowConfirmModal(false)} style={styles.dialogCloseBtn}>
+                <X size={18} color={colors.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.dialogTitle, { color: colors.ink }]}>Request Officer Manual Review</Text>
+            <Text style={[styles.dialogDesc, { color: colors.muted }]}>
+              Submit Case <Text style={{ color: colors.telemetry, fontWeight: '700' }}>{aiResult.caseId}</Text> for human police warden inspection.
+            </Text>
+
+            {/* Fee Breakdown Box */}
+            <View style={[styles.breakdownBox, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
+              <View style={styles.breakdownRow}>
+                <Text style={[styles.breakdownKey, { color: colors.muted }]}>Manual Review Fee:</Text>
+                <Text style={[styles.breakdownVal, { color: colors.ink }]}>PKR 100</Text>
+              </View>
+              <View style={styles.breakdownRow}>
+                <Text style={[styles.breakdownKey, { color: colors.muted }]}>Current Wallet Balance:</Text>
+                <Text style={[styles.breakdownVal, { color: '#10b981' }]}>PKR {walletBalance.toLocaleString()}</Text>
+              </View>
+              <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: colors.edge, paddingTop: 8, marginTop: 4 }]}>
+                <Text style={[styles.breakdownKey, { color: colors.ink, fontWeight: '700' }]}>Balance After Payment:</Text>
+                <Text style={[styles.breakdownVal, { color: colors.ink, fontWeight: '700' }]}>PKR {(walletBalance - 100).toLocaleString()}</Text>
+              </View>
+            </View>
+
+            <Text style={[styles.dialogPolicyText, { color: colors.muted }]}>
+              Note: A certified traffic warden will verify the 6 video frames within 24-48 hours. If violation is confirmed, your PKR 100 is refunded + bounty rewarded.
+            </Text>
+
+            <View style={styles.dialogBtnRow}>
+              <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.edge }]} onPress={() => setShowConfirmModal(false)} disabled={processingDeduction}>
+                <Text style={[styles.cancelBtnText, { color: colors.ink }]}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: '#f59e0b' }]} onPress={handleConfirmManualReview} disabled={processingDeduction}>
+                {processingDeduction ? (
+                  <ActivityIndicator size="small" color="#000" />
+                ) : (
+                  <>
+                    <CreditCard size={16} color="#000" />
+                    <Text style={styles.confirmBtnText}>Pay PKR 100 & Submit</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL 3: Insufficient Wallet Balance Modal */}
+      <Modal visible={showRechargeModal} transparent animationType="slide" onRequestClose={() => setShowRechargeModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.dialogCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+            <View style={styles.dialogHeaderRow}>
+              <View style={[styles.dialogIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                <AlertCircle size={24} color="#ef4444" />
+              </View>
+              <TouchableOpacity onPress={() => setShowRechargeModal(false)} style={styles.dialogCloseBtn}>
+                <X size={18} color={colors.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.dialogTitle, { color: colors.ink }]}>Insufficient Wallet Balance</Text>
+            <Text style={[styles.dialogDesc, { color: colors.muted }]}>
+              Manual review requires <Text style={{ color: colors.ink, fontWeight: '700' }}>PKR 100</Text>. Your current balance is only <Text style={{ color: '#ef4444', fontWeight: '700' }}>PKR {walletBalance.toLocaleString()}</Text>.
+            </Text>
+
+            <Text style={[styles.rechargeLabel, { color: colors.muted }]}>QUICK RECHARGE / TOP UP FUNDS:</Text>
+            <View style={styles.topUpRow}>
+              <TouchableOpacity style={[styles.topUpBtn, { backgroundColor: colors.canvas, borderColor: colors.edge }]} onPress={() => handleQuickRecharge(100)}>
+                <PlusCircle size={14} color={colors.telemetry} />
+                <Text style={[styles.topUpBtnText, { color: colors.ink }]}>+PKR 100</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.topUpBtn, { backgroundColor: colors.canvas, borderColor: colors.edge }]} onPress={() => handleQuickRecharge(500)}>
+                <PlusCircle size={14} color={colors.telemetry} />
+                <Text style={[styles.topUpBtnText, { color: colors.ink }]}>+PKR 500</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.topUpBtn, { backgroundColor: colors.canvas, borderColor: colors.edge }]} onPress={() => handleQuickRecharge(1000)}>
+                <PlusCircle size={14} color={colors.telemetry} />
+                <Text style={[styles.topUpBtnText, { color: colors.ink }]}>+PKR 1,000</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ marginTop: 18, gap: 10 }}>
+              {onGoToWallet && (
+                <TouchableOpacity
+                  style={[styles.outlineBtn, { borderColor: colors.telemetry }]}
+                  onPress={() => {
+                    setShowRechargeModal(false);
+                    onGoToWallet();
+                  }}
+                >
+                  <Wallet size={16} color={colors.telemetry} />
+                  <Text style={[styles.outlineBtnText, { color: colors.telemetry }]}>Open Citizen Wallet Tab</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.edge }]} onPress={() => setShowRechargeModal(false)}>
+                <Text style={[styles.cancelBtnText, { color: colors.muted }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL 4: Success Popup Modal (Requested by User) */}
+      <Modal visible={showSuccessModal} transparent animationType="fade" onRequestClose={() => setShowSuccessModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.successCard, { backgroundColor: colors.surface, borderColor: '#10b981' }]}>
+            <View style={styles.successIconBox}>
+              <CheckCircle2 size={44} color="#10b981" />
+            </View>
+
+            <Text style={[styles.successTitle, { color: colors.ink }]}>Submitted for Manual Review!</Text>
+            <Text style={[styles.successDesc, { color: colors.muted }]}>
+              Your case evidence for <Text style={{ color: colors.telemetry, fontWeight: '700' }}>{aiResult.caseId}</Text> has been successfully queued for traffic warden verification.
+            </Text>
+
+            <View style={[styles.successDetailsBox, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
+              <View style={styles.successDetailRow}>
+                <Text style={[styles.successDetailKey, { color: colors.muted }]}>Deducted Fee:</Text>
+                <Text style={[styles.successDetailVal, { color: '#ef4444' }]}>-PKR 100</Text>
+              </View>
+              <View style={styles.successDetailRow}>
+                <Text style={[styles.successDetailKey, { color: colors.muted }]}>Remaining Wallet Balance:</Text>
+                <Text style={[styles.successDetailVal, { color: '#10b981' }]}>PKR {walletBalance.toLocaleString()}</Text>
+              </View>
+              <View style={styles.successDetailRow}>
+                <Text style={[styles.successDetailKey, { color: colors.muted }]}>Audit Resolution Time:</Text>
+                <Text style={[styles.successDetailVal, { color: colors.ink }]}>24 – 48 Hours</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.successDoneBtn, { backgroundColor: colors.telemetry }]}
+              onPress={() => setShowSuccessModal(false)}
+            >
+              <Text style={styles.successDoneBtnText}>Acknowledge & Continue</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -347,6 +769,142 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+
+  // Analyzed Frames Carousel
+  framesScrollContainer: {
+    gap: 10,
+    paddingVertical: 4,
+  },
+  frameCard: {
+    width: 140,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  frameThumbnail: {
+    width: 140,
+    height: 95,
+  },
+  frameBadgeRow: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  frameIndexPill: {
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  frameIndexText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  frameZoomBtn: {
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    padding: 4,
+    borderRadius: 4,
+  },
+  frameFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  frameFooterText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+
+  // Manual Review Card
+  manualReviewCard: {
+    marginTop: 18,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    padding: 16,
+  },
+  manualHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  manualReviewPre: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  feePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  feePillText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  manualTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  manualDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  walletStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  walletStatusLabel: {
+    fontSize: 12,
+  },
+  walletStatusAmount: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  balancePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  manualReviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  manualReviewBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  submittedSuccessBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+
+  // Telemetry details
   detailCard: {
     borderRadius: 12,
     borderWidth: 1,
@@ -371,6 +929,17 @@ const styles = StyleSheet.create({
   },
   detailVal: {
     fontSize: 13,
+  },
+  platePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  plateNumberText: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   reasoningCard: {
     borderRadius: 12,
@@ -416,5 +985,243 @@ const styles = StyleSheet.create({
   secondaryBtnText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // Modals & Popups
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  lightboxContainer: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'space-between',
+  },
+  lightboxHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  lightboxTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  lightboxSub: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  closeBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    padding: 8,
+    borderRadius: 20,
+  },
+  lightboxImageWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '80%',
+  },
+  lightboxFooter: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  lightboxFooterText: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+
+  // Dialog Card
+  dialogCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    padding: 20,
+  },
+  dialogHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  dialogIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dialogCloseBtn: {
+    padding: 4,
+  },
+  dialogTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  dialogDesc: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  breakdownBox: {
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 8,
+    marginBottom: 12,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  breakdownKey: {
+    fontSize: 12,
+  },
+  breakdownVal: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  dialogPolicyText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontStyle: 'italic',
+    marginBottom: 16,
+  },
+  dialogBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  cancelBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  confirmBtn: {
+    flex: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  confirmBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  // Top Up Box
+  rechargeLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  topUpRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  topUpBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  topUpBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  outlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  outlineBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  // Success Card
+  successCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 18,
+    borderWidth: 2,
+    padding: 24,
+    alignItems: 'center',
+  },
+  successIconBox: {
+    marginBottom: 12,
+  },
+  successTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  successDesc: {
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  successDetailsBox: {
+    width: '100%',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 6,
+    marginBottom: 18,
+  },
+  successDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  successDetailKey: {
+    fontSize: 12,
+  },
+  successDetailVal: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  successDoneBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  successDoneBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

@@ -223,16 +223,72 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setBusy(true);
     setError('');
     try {
-      if (password) {
-        await supabase.auth.updateUser({ password }).catch(() => { });
-      }
+      const targetEmail = email.trim().toLowerCase();
       const cleanPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
       const formattedPhone = cleanPhone ? `+92${cleanPhone}` : null;
       const cnicDigits = cnic.replace(/\D/g, '');
       const cnicLast4 = cnicDigits.slice(-4) || '1234';
 
-      const { data: auth } = await supabase.auth.getUser();
-      const currentUserId = auth.user?.id;
+      // Enforce 1 account per CNIC restriction
+      if (cnicDigits.length === 13) {
+        try {
+          const { data: existingUser } = await supabase
+            .from('base_users')
+            .select('user_id')
+            .eq('cnic_last4', cnicLast4)
+            .limit(1);
+
+          if (existingUser && existingUser.length > 0) {
+            const match = existingUser[0];
+            const { data: currentAuth } = await supabase.auth.getUser();
+            if (currentAuth.user && match.user_id !== currentAuth.user.id) {
+              setError('This CNIC is already registered. Only 1 citizen account is permitted per CNIC.');
+              setBusy(false);
+              return;
+            }
+          }
+        } catch {}
+      }
+
+      // 1. Ensure user account is actually created or signed in with Supabase Auth
+      let { data: auth } = await supabase.auth.getUser();
+      let currentUserId = auth.user?.id;
+
+      if (!currentUserId && targetEmail && password) {
+        // Try sign in first (if already created via OTP or prior attempt)
+        const { data: signInData } = await supabase.auth.signInWithPassword({
+          email: targetEmail,
+          password: password,
+        });
+        if (signInData.user) {
+          currentUserId = signInData.user.id;
+        } else {
+          // Sign up with email & password
+          const { data: signUpData } = await supabase.auth.signUp({
+            email: targetEmail,
+            password: password,
+            options: {
+              data: { full_name: name.trim() },
+            },
+          });
+          if (signUpData.user) {
+            currentUserId = signUpData.user.id;
+          }
+        }
+      } else if (password) {
+        await supabase.auth.updateUser({ password }).catch(() => {});
+      }
+
+      // 2. Save directly to UserContext and Local Cache immediately
+      const profileToCache = {
+        name: name.trim(),
+        email: targetEmail,
+        phone: formattedPhone || phone.trim() || '',
+        cnic: cnic.trim() || `••••••••${cnicLast4}`,
+        plate: vehicle.trim() || '',
+      };
+      await AsyncStorage.setItem('@roadwatch_user_profile', JSON.stringify(profileToCache)).catch(() => {});
+      await AsyncStorage.removeItem(ONBOARDING_TEMP_STORAGE_KEY).catch(() => {});
 
       if (currentUserId) {
         // Direct save into base_users
@@ -240,12 +296,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           await supabase.from('base_users').upsert({
             user_id: currentUserId,
             name: name.trim(),
-            email: email.trim(),
+            email: targetEmail,
             phone: formattedPhone,
             cnic_last4: cnicLast4,
             account_state: 'active',
             registration_completed_at: new Date().toISOString(),
-          });
+          }, { onConflict: 'user_id' });
         } catch {}
 
         // Direct save into reporter_profiles
@@ -253,33 +309,21 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           await supabase.from('reporter_profiles').upsert({
             reporter_id: currentUserId,
             vehicle_plate: vehicle.trim() || null,
-          });
+          }, { onConflict: 'reporter_id' });
         } catch {}
-      } else {
-        // Fallback to RPC if available
+
         try {
           await supabase.rpc('complete_reporter_registration', {
             p_name: name.trim(),
             p_cnic: cnic,
-            p_email: email.trim(),
+            p_email: targetEmail,
             p_vehicle_plate: vehicle.trim() || null,
             p_phone: formattedPhone,
           });
         } catch {}
       }
 
-      // Save directly to UserContext and Local Cache immediately
-      const profileToCache = {
-        name: name.trim(),
-        email: email.trim(),
-        phone: formattedPhone || '',
-        cnic: `••••••••${cnicLast4}`,
-        plate: vehicle.trim() || '',
-      };
-      await AsyncStorage.setItem('@roadwatch_user_profile', JSON.stringify(profileToCache)).catch(() => {});
-      await AsyncStorage.removeItem(ONBOARDING_TEMP_STORAGE_KEY).catch(() => {});
-
-      await refreshProfile().catch(() => { });
+      await refreshProfile().catch(() => {});
       onComplete();
     } catch (cause) {
       console.log('Onboarding completion note:', cause);

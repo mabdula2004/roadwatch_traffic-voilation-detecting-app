@@ -97,6 +97,11 @@ function MainApp() {
               setLatestOutcome(null);
               setActiveScreen('capture');
             }}
+            onGoToWallet={() => {
+              setClip(null);
+              setLatestOutcome(null);
+              setActiveScreen('wallet');
+            }}
           />
         )}
 

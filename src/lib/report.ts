@@ -8,6 +8,7 @@ export interface CapturedClip {
   capturedAt: string;
   latitude: number;
   longitude: number;
+  locationName?: string;
   accuracy: number | null;
   durationMs: number;
   framesBase64?: string[];
@@ -21,6 +22,7 @@ export interface StoredCaseReport {
   uploadedAt: string;
   latitude: number;
   longitude: number;
+  locationName?: string;
   accuracy: number | null;
   status: string;
   aiResult?: AiEvidentiaryResult;
@@ -45,6 +47,7 @@ export async function uploadReport(
     uploadedAt: new Date().toISOString(),
     latitude: clip.latitude,
     longitude: clip.longitude,
+    locationName: clip.locationName,
     accuracy: clip.accuracy,
     status: aiResult?.status || 'uploaded',
     aiResult,
@@ -136,5 +139,33 @@ export async function getLocalReports(): Promise<StoredCaseReport[]> {
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
+  }
+}
+
+export async function updateReportStatus(reportId: string, status: string): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+    if (raw) {
+      const list: StoredCaseReport[] = JSON.parse(raw);
+      const updated = list.map(item => {
+        if (item.reportId === reportId || item.clientCaptureId === reportId) {
+          return {
+            ...item,
+            status,
+            aiResult: item.aiResult ? { ...item.aiResult, status: status as any, statusLabel: 'Pending Manual Officer Review' } : undefined,
+          };
+        }
+        return item;
+      });
+      await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.error('Failed to update local report status:', e);
+  }
+
+  try {
+    await supabase.from('reports').update({ status }).eq('report_id', reportId);
+  } catch (e) {
+    console.log('Remote status update note:', e);
   }
 }

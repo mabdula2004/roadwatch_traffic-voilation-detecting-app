@@ -71,16 +71,35 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
       const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude, accuracy } = location.coords;
       setGps({ latitude, longitude, accuracy });
+
+      // Fetch reverse geocoded place name (City, Area)
+      let locationName = '';
+      try {
+        const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (places && places.length > 0) {
+          const p = places[0];
+          const parts = [
+            p.street || p.name,
+            p.district || p.subregion,
+            p.city,
+            p.region,
+          ].filter(Boolean);
+          locationName = parts.length > 0 ? parts.join(', ') : (p.city || '');
+        }
+      } catch (geoErr) {
+        console.log('Reverse geocoding notice:', geoErr);
+      }
+
       const capturedAt = new Date().toISOString();
       const startMs = Date.now();
       setPreparing(false);
       setRecording(true);
       const result = await camera.current.recordAsync({ maxDuration: 30, maxFileSize: 50 * 1024 * 1024 });
       const durationMs = Date.now() - startMs;
-      if (durationMs < 10000) {
+      if (durationMs < 5000) {
         Alert.alert(
-          'Video Too Short (< 10s)',
-          'Evidence recording must be at least 10 seconds long for legal verification. Please record again.',
+          'Video Too Short (< 5s)',
+          'Evidence recording must be at least 5 seconds long for legal verification. Please record again.',
           [{ text: 'OK' }]
         );
         return;
@@ -93,6 +112,7 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
           capturedAt,
           latitude,
           longitude,
+          locationName,
           accuracy,
           durationMs,
         });
@@ -102,10 +122,10 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
   }
 
   function handleStop() {
-    if (recordingDurationSec < 10) {
+    if (recordingDurationSec < 5) {
       Alert.alert(
-        'Minimum 10 Seconds Required',
-        `Evidence requires at least 10 seconds of continuous footage (currently ${recordingDurationSec}s). Please wait ${10 - recordingDurationSec} more second(s) before stopping.`,
+        'Minimum 5 Seconds Required',
+        `Evidence requires at least 5 seconds of continuous footage (currently ${recordingDurationSec}s). Please wait ${5 - recordingDurationSec} more second(s) before stopping.`,
         [{ text: 'Keep Recording' }]
       );
       return;
@@ -123,12 +143,12 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
         <View style={styles.hudTop}>
           <View style={styles.topHeaderRow}>
             {recording && (
-              <View style={[styles.recBadge, recordingDurationSec >= 10 ? { borderColor: Colors.valid } : {}]}>
-                <View style={[styles.recDot, recordingDurationSec >= 10 ? { backgroundColor: Colors.valid } : {}]} />
-                <Text style={[styles.recText, recordingDurationSec >= 10 ? { color: Colors.valid } : {}]}>
+              <View style={[styles.recBadge, recordingDurationSec >= 5 ? { borderColor: Colors.valid } : {}]}>
+                <View style={[styles.recDot, recordingDurationSec >= 5 ? { backgroundColor: Colors.valid } : {}]} />
+                <Text style={[styles.recText, recordingDurationSec >= 5 ? { color: Colors.valid } : {}]}>
                   REC {formatDuration(recordingDurationSec)}
                 </Text>
-                <Text style={styles.recMaxText}>/ 00:30 (Min 10s)</Text>
+                <Text style={styles.recMaxText}>/ 00:30 (Min 5s)</Text>
               </View>
             )}
             <View style={styles.timeBadge}>
@@ -157,17 +177,17 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
             </View>
           </View>
           <View style={[styles.scanBadge, recording && styles.scanBadgeRecording]}>
-            <Scan size={14} color={recording ? (recordingDurationSec >= 10 ? Colors.valid : Colors.signal) : Colors.telemetry} />
+            <Scan size={14} color={recording ? (recordingDurationSec >= 5 ? Colors.valid : Colors.signal) : Colors.telemetry} />
             <Text style={[styles.scanText, recording && styles.scanTextRecording]}>
               {!permission?.granted
                 ? 'TAP BELOW TO ALLOW CAMERA'
                 : recording
-                ? recordingDurationSec < 10
-                  ? `RECORDING (${recordingDurationSec}s) · MIN 10s REQUIRED`
+                ? recordingDurationSec < 5
+                  ? `RECORDING (${recordingDurationSec}s) · MIN 5s REQUIRED`
                   : `RECORDING (${recordingDurationSec}s) · TAP TO STOP (MAX 30s)`
                 : preparing
                 ? 'GETTING GPS'
-                : 'READY TO RECORD (10s – 30s)'}
+                : 'READY TO RECORD (5s – 30s)'}
             </Text>
           </View>
         </View>

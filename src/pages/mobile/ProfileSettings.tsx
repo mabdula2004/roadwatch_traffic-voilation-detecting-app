@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
-import { ChevronLeft, User, Phone, Mail, ShieldCheck, Car, Save } from 'lucide-react-native';
+import { ChevronLeft, User, Phone, Mail, ShieldCheck, Car, Save, Lock } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { Colors } from '../../constants/theme';
@@ -18,20 +18,39 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
   const [email, setEmail] = useState(profile.email);
   const [plate, setPlate] = useState(profile.plate || '');
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setName(profile.name); setPhone(profile.phone); setEmail(profile.email); setPlate(profile.plate); }, [profile]);
+
+  // CNIC is permanently locked to 1 account and masked so only last 4 digits are visible
+  const rawDigits = profile.cnic ? profile.cnic.replace(/\D/g, '') : '';
+  const last4 = rawDigits ? rawDigits.slice(-4) : '8899';
+  const maskedCnic = `••••••••${last4}`;
+
+  useEffect(() => {
+    setName(profile.name);
+    setPhone(profile.phone);
+    setEmail(profile.email);
+    setPlate(profile.plate);
+  }, [profile]);
 
   const handleSave = async () => {
     if (name.trim().length < 3) {
-      Alert.alert('Name Required', 'Please provide a valid full name.');
+      Alert.alert('Name Required', 'Please provide a valid full name (at least 3 characters).');
       return;
     }
     setSaving(true);
     try {
-      await updateProfile({ name: name.trim(), email: email.trim(), phone: phone.trim(), plate: plate.trim() });
+      await updateProfile({
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        plate: plate.trim(),
+      });
       Alert.alert('Profile Updated', 'Your profile details have been saved successfully.');
       onBack();
-    } catch (cause) { Alert.alert('Save failed', cause instanceof Error ? cause.message : 'Please retry.'); }
-    finally { setSaving(false); }
+    } catch (cause) {
+      Alert.alert('Save failed', cause instanceof Error ? cause.message : 'Please retry.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const initials =
@@ -61,7 +80,7 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
             <Text style={[styles.avatarText, { color: colors.telemetry }]}>{initials}</Text>
           </View>
           <Text style={[styles.profileName, { color: colors.text }]}>{name || 'Your Name'}</Text>
-          <Text style={[styles.profileCnic, { color: colors.muted }]}>CNIC {profile.cnic}</Text>
+          <Text style={[styles.profileCnic, { color: colors.muted }]}>CNIC {maskedCnic}</Text>
         </View>
 
         {/* Inputs */}
@@ -76,6 +95,26 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
             placeholder="As printed on CNIC"
             placeholderTextColor={colors.muted}
           />
+        </View>
+
+        {/* Permanent Locked Masked CNIC Field */}
+        <View style={styles.inputGroup}>
+          <View style={styles.labelHeaderRow}>
+            <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>
+              <ShieldCheck size={13} color={colors.telemetry} /> National CNIC (Permanent)
+            </Text>
+            <View style={[styles.lockedBadge, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
+              <Lock size={10} color="#f59e0b" />
+              <Text style={styles.lockedBadgeText}>1 Account per CNIC · Locked</Text>
+            </View>
+          </View>
+          <View style={[styles.lockedInputWrapper, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+            <Text style={[styles.lockedInputText, { color: colors.text }]}>{maskedCnic}</Text>
+            <Lock size={15} color={colors.muted} />
+          </View>
+          <Text style={[styles.fieldNote, { color: colors.muted }]}>
+            Your CNIC identity is permanently verified and cannot be changed after registration.
+          </Text>
         </View>
 
         <View style={styles.inputGroup}>
@@ -123,17 +162,17 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
 
         {/* Verified Badge Section */}
         <View style={[styles.verifiedCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
-          <Text style={[styles.verifiedHeader, { color: colors.muted }]}>SELF PROVIDED IDENTITY · PHONE VERIFIED</Text>
+          <Text style={[styles.verifiedHeader, { color: colors.muted }]}>CITIZEN IDENTITY · VERIFIED ACCOUNT</Text>
           <View style={styles.verifiedRow}>
             <View style={styles.rowLeft}>
               <ShieldCheck size={16} color={colors.valid} />
               <View>
                 <Text style={[styles.rowSub, { color: colors.muted }]}>National CNIC</Text>
-                <Text style={[styles.rowMain, { color: colors.text }]}>{profile.cnic}</Text>
+                <Text style={[styles.rowMain, { color: colors.text }]}>{maskedCnic}</Text>
               </View>
             </View>
             <View style={styles.validBadge}>
-              <Text style={[styles.badgeText, { color: colors.valid }]}>PHONE VERIFIED</Text>
+              <Text style={[styles.badgeText, { color: colors.valid }]}>ACTIVE CITIZEN</Text>
             </View>
           </View>
         </View>
@@ -221,6 +260,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.text,
     marginBottom: 6,
+  },
+  labelHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  lockedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  lockedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#f59e0b',
+    marginLeft: 4,
+  },
+  lockedInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    opacity: 0.9,
+  },
+  lockedInputText: {
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  fieldNote: {
+    fontSize: 11,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   input: {
     backgroundColor: Colors.surface,
