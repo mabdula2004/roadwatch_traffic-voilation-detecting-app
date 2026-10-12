@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert 
 import { ChevronLeft, User, Phone, Mail, ShieldCheck, Car, Save, Lock } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useUserProfile } from '../../contexts/UserContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { Colors } from '../../constants/theme';
 
 interface ProfileSettingsProps {
@@ -12,6 +13,7 @@ interface ProfileSettingsProps {
 export function ProfileSettings({ onBack }: ProfileSettingsProps) {
   const { colors } = useTheme();
   const { profile, updateProfile } = useUserProfile();
+  const { t, isUrdu } = useLanguage();
 
   const [name, setName] = useState(profile.name);
   const [phone, setPhone] = useState(profile.phone);
@@ -33,7 +35,7 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
 
   const handleSave = async () => {
     if (name.trim().length < 3) {
-      Alert.alert('Name Required', 'Please provide a valid full name (at least 3 characters).');
+      Alert.alert(t('nameRequired'), t('nameValidationMsg'));
       return;
     }
     setSaving(true);
@@ -44,10 +46,10 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
         phone: phone.trim(),
         plate: plate.trim(),
       });
-      Alert.alert('Profile Updated', 'Your profile details have been saved successfully.');
+      Alert.alert(t('profileUpdated'), t('profileSavedSuccess'));
       onBack();
     } catch (cause) {
-      Alert.alert('Save failed', cause instanceof Error ? cause.message : 'Please retry.');
+      Alert.alert(t('saveFailed'), cause instanceof Error ? cause.message : 'Please retry.');
     } finally {
       setSaving(false);
     }
@@ -67,9 +69,9 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
       <View style={[styles.header, { backgroundColor: colors.canvas, borderBottomColor: colors.edge }]}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <ChevronLeft size={20} color={colors.muted} />
-          <Text style={[styles.backText, { color: colors.muted }]}>Back to Settings</Text>
+          <Text style={[styles.backText, { color: colors.muted }]}>{t('backToSettings')}</Text>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Edit Profile</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('editProfile')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -79,20 +81,20 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
           <View style={styles.avatarCircle}>
             <Text style={[styles.avatarText, { color: colors.telemetry }]}>{initials}</Text>
           </View>
-          <Text style={[styles.profileName, { color: colors.text }]}>{name || 'Your Name'}</Text>
+          <Text style={[styles.profileName, { color: colors.text }]}>{name || (isUrdu ? 'آپ کا نام' : 'Your Name')}</Text>
           <Text style={[styles.profileCnic, { color: colors.muted }]}>CNIC {maskedCnic}</Text>
         </View>
 
         {/* Inputs */}
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: colors.text }]}>
-            <User size={13} color={colors.telemetry} /> Full Name
+            <User size={13} color={colors.telemetry} /> {t('fullName')}
           </Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.edge, color: colors.text }]}
             value={name}
             onChangeText={setName}
-            placeholder="As printed on CNIC"
+            placeholder={t('asPrintedOnCnic')}
             placeholderTextColor={colors.muted}
           />
         </View>
@@ -101,11 +103,11 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
         <View style={styles.inputGroup}>
           <View style={styles.labelHeaderRow}>
             <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>
-              <ShieldCheck size={13} color={colors.telemetry} /> National CNIC (Permanent)
+              <ShieldCheck size={13} color={colors.telemetry} /> {t('cnic')}
             </Text>
             <View style={[styles.lockedBadge, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
               <Lock size={10} color="#f59e0b" />
-              <Text style={styles.lockedBadgeText}>1 Account per CNIC · Locked</Text>
+              <Text style={styles.lockedBadgeText}>{t('cnicLockedBadge')}</Text>
             </View>
           </View>
           <View style={[styles.lockedInputWrapper, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
@@ -113,13 +115,13 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
             <Lock size={15} color={colors.muted} />
           </View>
           <Text style={[styles.fieldNote, { color: colors.muted }]}>
-            Your CNIC identity is permanently verified and cannot be changed after registration.
+            {t('cnicLockedHelp')}
           </Text>
         </View>
 
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: colors.text }]}>
-            <Phone size={13} color={colors.telemetry} /> Phone Number
+            <Phone size={13} color={colors.telemetry} /> {t('phoneNumber')}
           </Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.edge, color: colors.text }]}
@@ -134,7 +136,7 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
 
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: colors.text }]}>
-            <Mail size={13} color={colors.telemetry} /> Email Address
+            <Mail size={13} color={colors.telemetry} /> {t('emailAddress')}
           </Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.edge, color: colors.text }]}
@@ -148,7 +150,7 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
 
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: colors.text }]}>
-            <Car size={13} color={colors.telemetry} /> Vehicle Number Plate
+            <Car size={13} color={colors.telemetry} /> {t('registeredPlate')}
           </Text>
           <TextInput
             style={[styles.input, { letterSpacing: 1, fontWeight: '700', backgroundColor: colors.surface, borderColor: colors.edge, color: colors.text }]}
@@ -162,17 +164,17 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
 
         {/* Verified Badge Section */}
         <View style={[styles.verifiedCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
-          <Text style={[styles.verifiedHeader, { color: colors.muted }]}>CITIZEN IDENTITY · VERIFIED ACCOUNT</Text>
+          <Text style={[styles.verifiedHeader, { color: colors.muted }]}>{isUrdu ? 'شہری شناخت · تصدیق شدہ اکاؤنٹ' : 'CITIZEN IDENTITY · VERIFIED ACCOUNT'}</Text>
           <View style={styles.verifiedRow}>
             <View style={styles.rowLeft}>
               <ShieldCheck size={16} color={colors.valid} />
               <View>
-                <Text style={[styles.rowSub, { color: colors.muted }]}>National CNIC</Text>
+                <Text style={[styles.rowSub, { color: colors.muted }]}>{t('cnic')}</Text>
                 <Text style={[styles.rowMain, { color: colors.text }]}>{maskedCnic}</Text>
               </View>
             </View>
             <View style={styles.validBadge}>
-              <Text style={[styles.badgeText, { color: colors.valid }]}>ACTIVE CITIZEN</Text>
+              <Text style={[styles.badgeText, { color: colors.valid }]}>{isUrdu ? 'ایکٹو شہری' : 'ACTIVE CITIZEN'}</Text>
             </View>
           </View>
         </View>
@@ -180,7 +182,7 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
         {/* Save Button */}
         <TouchableOpacity style={[styles.saveButton, { backgroundColor: colors.accent, opacity: saving ? 0.5 : 1 }]} disabled={saving} onPress={handleSave}>
           <Save size={18} color="#000" />
-          <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save Changes'}</Text>
+          <Text style={styles.saveText}>{saving ? (isUrdu ? 'محفوظ ہو رہا ہے…' : 'Saving…') : t('saveChanges')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

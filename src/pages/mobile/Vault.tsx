@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { UploadCloud, CheckCircle2, HardDrive, RefreshCw, Video } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { pendingUploads } from '../../data/queue';
 import { Colors } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
@@ -18,6 +19,7 @@ type ReportRow = { report_id: string; claimed_class: string; captured_at: string
 
 export function Vault() {
   const { colors } = useTheme();
+  const { t, isUrdu } = useLanguage();
   const [activeTab, setActiveTab] = useState<'pending' | 'sealed'>('pending');
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -79,24 +81,24 @@ export function Vault() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={[styles.title, { color: colors.ink }]}>Evidence Vault</Text>
+        <Text style={[styles.title, { color: colors.ink }]}>{t('evidenceVault')}</Text>
 
         {/* Stats Grid */}
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
             <UploadCloud size={16} color={colors.telemetry} />
             <Text style={[styles.statValue, { color: colors.ink }]}>{pending.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.muted }]}>Pending</Text>
+            <Text style={[styles.statLabel, { color: colors.muted }]}>{t('pending')}</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
             <CheckCircle2 size={16} color={colors.valid} />
             <Text style={[styles.statValue, { color: colors.ink }]}>{sealed.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.muted }]}>Sealed</Text>
+            <Text style={[styles.statLabel, { color: colors.muted }]}>{t('sealed')}</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
             <HardDrive size={16} color={colors.muted} />
             <Text style={[styles.statValue, { color: colors.ink }]}>—</Text>
-            <Text style={[styles.statLabel, { color: colors.muted }]}>On device</Text>
+            <Text style={[styles.statLabel, { color: colors.muted }]}>{t('onDevice')}</Text>
           </View>
         </View>
 
@@ -108,7 +110,7 @@ export function Vault() {
             activeOpacity={0.8}
           >
             <Text style={[styles.tabText, { color: activeTab === 'pending' ? colors.telemetry : colors.muted }]}>
-              Pending Uploads
+              {t('pendingUpload')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -117,7 +119,7 @@ export function Vault() {
             activeOpacity={0.8}
           >
             <Text style={[styles.tabText, { color: activeTab === 'sealed' ? colors.telemetry : colors.muted }]}>
-              Sealed Reports
+              {t('sealedEvidence')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -139,14 +141,14 @@ export function Vault() {
                     styles.badge,
                     styles.badgeMuted
                   ]}>
-                    <Text style={[styles.badgeText, { color: colors.ink }]}>{u.status === 'failed' ? 'Failed' : 'Awaiting upload'}</Text>
+                    <Text style={[styles.badgeText, { color: colors.ink }]}>{u.status === 'failed' ? (isUrdu ? 'ناکام' : 'Failed') : t('pendingUpload')}</Text>
                   </View>
                 </View>
 
-                <Text style={[styles.cardSub, { color: colors.muted }]}>Return to your recording if upload failed. Keep the video until it is confirmed.</Text>
+                <Text style={[styles.cardSub, { color: colors.muted }]}>{isUrdu ? 'اپلوڈ مکمل ہونے تک ویڈیو ڈیوائس پر محفوظ رکھی جاتی ہے۔' : 'Keep the video until it is confirmed.'}</Text>
               </View>
             ))}
-            {!pending.length && <Text style={{ color: colors.muted }}>No pending uploads.</Text>}
+            {!pending.length && <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 20 }}>{t('noPendingUploads')}</Text>}
           </View>
         ) : (
           <View style={styles.list}>
@@ -163,11 +165,11 @@ export function Vault() {
                   styles.badge,
                   r.status === 'accepted' ? styles.badgeValid : r.status === 'rejected' ? styles.badgeSignal : styles.badgeAccent
                 ]}>
-                  <Text style={[styles.badgeText, { color: colors.ink }]}>{r.status === 'uploaded' ? 'Analysis pending' : r.status.replace(/_/g, ' ')}</Text>
+                  <Text style={[styles.badgeText, { color: colors.ink }]}>{r.status === 'uploaded' ? (isUrdu ? 'تجزیہ زیر التواء' : 'Analysis pending') : r.status.replace(/_/g, ' ')}</Text>
                 </View>
               </View>
             ))}
-            {!sealed.length && <Text style={{ color: colors.muted }}>No uploaded reports yet.</Text>}
+            {!sealed.length && <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 20 }}>{t('noSealedRecords')}</Text>}
           </View>
         )}
         {!!loadError && <Text accessibilityRole="alert" style={{ color: colors.signal, marginTop: 12 }}>{loadError}</Text>}

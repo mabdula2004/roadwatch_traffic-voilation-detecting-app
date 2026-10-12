@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Shield, Lock, Wallet, Camera, Settings } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface BottomNavProps {
   activeTab: string;
@@ -11,13 +12,14 @@ interface BottomNavProps {
 
 export function BottomNav({ activeTab, onSelectTab }: BottomNavProps) {
   const { colors } = useTheme();
+  const { t } = useLanguage();
 
   const tabs = [
-    { key: 'wallet', label: 'Wallet', Icon: Wallet },
-    { key: 'vault', label: 'Vault', Icon: Lock },
-    { key: 'capture', label: 'Capture', Icon: Camera },
-    { key: 'safety', label: 'Safety', Icon: Shield },
-    { key: 'settings', label: 'Settings', Icon: Settings },
+    { key: 'wallet', label: t('wallet'), Icon: Wallet },
+    { key: 'vault', label: t('vault'), Icon: Lock },
+    { key: 'capture', label: t('capture'), Icon: Camera },
+    { key: 'safety', label: t('safety'), Icon: Shield },
+    { key: 'settings', label: t('settings'), Icon: Settings },
   ];
 
   return (

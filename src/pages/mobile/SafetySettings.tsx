@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Li
 import { Siren, Phone, EyeOff, Search, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useUserProfile } from '../../contexts/UserContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { Colors } from '../../constants/theme';
 import * as Location from 'expo-location';
 
@@ -14,6 +15,7 @@ interface SafetySettingsProps {
 export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProps) {
   const { colors } = useTheme();
   const { profile } = useUserProfile();
+  const { t, isUrdu } = useLanguage();
   const [blurFaces, setBlurFaces] = useState(true);
 
   const handleSos = async () => {
@@ -44,23 +46,26 @@ export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProp
     <View style={[styles.container, { backgroundColor: colors.canvas }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.canvas, borderBottomColor: colors.edge }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Safety & Privacy</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('safetyAndPrivacy')}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Emergency help and what RoadWatch shares about you.</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>{t('safetySub')}</Text>
 
         {/* SOS Button */}
         <TouchableOpacity style={[styles.sosCard, { backgroundColor: colors.signal }]} onPress={handleSos} activeOpacity={0.85}>
           <Siren size={36} color="#FFF" />
-          <Text style={styles.sosTitle}>EMERGENCY SOS</Text>
-          <Text style={styles.sosSub}>Send profile & live GPS to Rescue 1122</Text>
+          <Text style={styles.sosTitle}>{t('emergencySos')}</Text>
+          <Text style={styles.sosSub}>{t('emergencySosSub')}</Text>
         </TouchableOpacity>
 
         {/* Quick Phone Buttons */}
         <View style={styles.phoneGrid}>
-          {['Police 15', 'Rescue 1122'].map((label) => (
-            <TouchableOpacity key={label} onPress={() => { void Linking.openURL(label === 'Police 15' ? 'tel:15' : 'tel:1122').catch(() => Alert.alert('Dialer unavailable', 'Is device par phone call available nahi hai.')); }} style={[styles.phoneButton, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+          {[
+            { key: 'police', label: t('police15'), number: '15' },
+            { key: 'rescue', label: t('rescue1122'), number: '1122' },
+          ].map(({ key, label, number }) => (
+            <TouchableOpacity key={key} onPress={() => { void Linking.openURL(`tel:${number}`).catch(() => Alert.alert(isUrdu ? 'کال دستیاب نہیں' : 'Dialer unavailable', t('dialerUnavailable'))); }} style={[styles.phoneButton, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
               <Phone size={14} color={colors.signal} />
               <Text style={[styles.phoneText, { color: colors.text }]}>{label}</Text>
             </TouchableOpacity>
@@ -68,13 +73,13 @@ export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProp
         </View>
 
         {/* Privacy Shield */}
-        <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>PRIVACY SHIELDS</Text>
+        <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('privacyShields')}</Text>
         <View style={[styles.settingCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
           <EyeOff size={18} color={colors.telemetry} />
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={[styles.settingTitle, { color: colors.text }]}>Auto-blur faces</Text>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>{t('autoBlurFaces')}</Text>
             <Text style={[styles.settingSub, { color: colors.textMuted }]}>
-              {blurFaces ? 'Automated privacy facial blur is active for clips.' : 'Disabled. Facial privacy blur is off.'}
+              {blurFaces ? t('autoBlurActive') : t('autoBlurDisabled')}
             </Text>
           </View>
           <Switch
@@ -89,8 +94,8 @@ export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProp
         <TouchableOpacity style={[styles.linkCard, { backgroundColor: colors.surface, borderColor: colors.edge }]} onPress={onOpenPlateSearch}>
           <Search size={18} color={colors.telemetry} />
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={[styles.linkTitle, { color: colors.text }]}>Public plate search</Text>
-            <Text style={[styles.linkSub, { color: colors.textMuted }]}>Government registry is not connected yet.</Text>
+            <Text style={[styles.linkTitle, { color: colors.text }]}>{t('publicPlateSearch')}</Text>
+            <Text style={[styles.linkSub, { color: colors.textMuted }]}>{t('publicPlateSub')}</Text>
           </View>
           <ChevronRight size={18} color={colors.textMuted} />
         </TouchableOpacity>

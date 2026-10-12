@@ -118,7 +118,7 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
   const rawCnicDigits = profile.cnic ? profile.cnic.replace(/\D/g, '') : '';
   const cnicLast4 = rawCnicDigits ? rawCnicDigits.slice(-4) : (profile.cnic?.includes('•') ? profile.cnic.slice(-4) : '8899');
   const cnicDisplay = `CNIC ••••••••${cnicLast4}`;
-  const plateDisplay = profile.plate ? profile.plate : 'No Plate Registered';
+  const plateDisplay = profile.plate ? profile.plate : t('noPlateRegistered');
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
@@ -149,11 +149,11 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
             </View>
             <View style={styles.trustInfo}>
               <Text style={[styles.reporterTrustLabel, { color: colors.muted }]}>{t('reporterTrust')}</Text>
-              <Text style={[styles.trustTitle, { color: colors.ink }]}>Reporter trust</Text>
-              <Text style={[styles.trustDesc, { color: colors.muted }]}>Score from your reporter profile. Reports are awaiting real review.</Text>
+              <Text style={[styles.trustTitle, { color: colors.ink }]}>{t('reporterTrustTitle')}</Text>
+              <Text style={[styles.trustDesc, { color: colors.muted }]}>{t('trustScoreDesc')}</Text>
               <View style={styles.trendingRow}>
                 <TrendingUp size={14} color={colors.valid} />
-                <Text style={[styles.trendingText, { color: colors.valid }]}>Current score</Text>
+                <Text style={[styles.trendingText, { color: colors.valid }]}>{t('currentScore')}</Text>
               </View>
             </View>
           </View>

@@ -1,4 +1,5 @@
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
@@ -21,6 +22,7 @@ interface LiveCaptureProps {
 
 export function LiveCapture({ onCapture }: LiveCaptureProps) {
   const { colors, resolvedTheme } = useTheme();
+  const { t, isUrdu } = useLanguage();
   const camera = useRef<CameraView>(null);
   const recordingNow = useRef(false);
   const [permission, askCamera] = useCameraPermissions();
@@ -160,11 +162,11 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
           <View style={styles.gpsRow}>
             <View style={styles.gpsBadge}>
               <MapPin size={12} color={Colors.telemetry} />
-              <Text style={styles.gpsText}>{gps ? `${gps.latitude.toFixed(5)}°, ${gps.longitude.toFixed(5)}°` : 'GPS on capture'}</Text>
+              <Text style={styles.gpsText}>{gps ? `${gps.latitude.toFixed(5)}°, ${gps.longitude.toFixed(5)}°` : t('gpsOnCapture')}</Text>
             </View>
             <View style={styles.gpsAccuracyBadge}>
               <View style={styles.dotValid} />
-              <Text style={styles.gpsAccuracyText}>{gps?.accuracy != null ? `GPS ±${Math.round(gps.accuracy)}m` : 'GPS pending'}</Text>
+              <Text style={styles.gpsAccuracyText}>{gps?.accuracy != null ? `GPS ±${Math.round(gps.accuracy)}m` : t('gpsPending')}</Text>
             </View>
           </View>
         </View>
@@ -173,21 +175,21 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
         <View style={styles.scanArea}>
           <View style={styles.reticle}>
             <View style={styles.reticleTag}>
-              <Text style={styles.reticleTagText}>FRAME GUIDE</Text>
+              <Text style={styles.reticleTagText}>{t('frameGuide')}</Text>
             </View>
           </View>
           <View style={[styles.scanBadge, recording && styles.scanBadgeRecording]}>
             <Scan size={14} color={recording ? (recordingDurationSec >= 5 ? Colors.valid : Colors.signal) : Colors.telemetry} />
             <Text style={[styles.scanText, recording && styles.scanTextRecording]}>
               {!permission?.granted
-                ? 'TAP BELOW TO ALLOW CAMERA'
+                ? t('tapToAllowCamera')
                 : recording
                 ? recordingDurationSec < 5
-                  ? `RECORDING (${recordingDurationSec}s) · MIN 5s REQUIRED`
-                  : `RECORDING (${recordingDurationSec}s) · TAP TO STOP (MAX 30s)`
+                  ? (isUrdu ? `ریکارڈنگ (${recordingDurationSec}s) · کم از کم 5 سیکنڈ` : `RECORDING (${recordingDurationSec}s) · MIN 5s REQUIRED`)
+                  : (isUrdu ? `ریکارڈنگ (${recordingDurationSec}s) · روکنے کے لیے دبائیں` : `RECORDING (${recordingDurationSec}s) · TAP TO STOP (MAX 30s)`)
                 : preparing
-                ? 'GETTING GPS'
-                : 'READY TO RECORD (5s – 30s)'}
+                ? t('gettingGps')
+                : t('readyToRecord')}
             </Text>
           </View>
         </View>

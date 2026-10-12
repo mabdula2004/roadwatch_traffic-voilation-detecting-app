@@ -1,4 +1,5 @@
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { ChevronLeft, EyeOff, Fingerprint, Lock, Download } from 'lucide-react-native';
@@ -16,6 +17,7 @@ interface ReportReviewProps {
 
 export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const { colors } = useTheme();
+  const { t, isUrdu } = useLanguage();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [fileSizeBytes, setFileSizeBytes] = useState<number>(0);
@@ -60,17 +62,17 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <ChevronLeft size={20} color={Colors.textMuted} />
-          <Text style={styles.backText}>Back to Live Camera</Text>
+          <Text style={styles.backText}>{isUrdu ? 'کیمرہ پر واپس جائیں' : 'Back to Live Camera'}</Text>
         </TouchableOpacity>
         <View style={styles.draftBadge}>
-          <Text style={styles.draftText}>DRAFT</Text>
+          <Text style={styles.draftText}>{isUrdu ? 'ڈرافٹ' : 'DRAFT'}</Text>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Review evidence</Text>
+        <Text style={styles.title}>{isUrdu ? 'شواہد کا جائزہ لیں' : 'Review evidence'}</Text>
         <Text style={styles.subtitle}>
-          Review your recorded video before uploading it to the private vault.
+          {isUrdu ? 'نجی والٹ میں محفوظ کرنے سے پہلے ریکارڈ شدہ ویڈیو چیک کریں۔' : 'Review your recorded video before uploading it to the private vault.'}
         </Text>
 
         {/* Evidence Video Card */}
@@ -81,7 +83,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             <View style={styles.imageFooter}>
               <View style={styles.blurBadge}>
                 <EyeOff size={12} color={Colors.telemetry} />
-                <Text style={styles.blurBadgeText}>FACIAL AUTO-BLUR ACTIVE</Text>
+                <Text style={styles.blurBadgeText}>{isUrdu ? 'چہرہ خودکار دھندلا فعال' : 'FACIAL AUTO-BLUR ACTIVE'}</Text>
               </View>
               <View style={styles.timeTag}>
                 <Text style={styles.timeText}>{Math.round(clip.durationMs / 1000)}s</Text>
@@ -93,7 +95,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             <View style={styles.metaLeft}>
               <View style={styles.metaRow}>
                 <Fingerprint size={14} color={Colors.valid} />
-                <Text style={styles.metaLabel}>RECORDED VIDEO</Text>
+                <Text style={styles.metaLabel}>{isUrdu ? 'ریکارڈ شدہ ویڈیو' : 'RECORDED VIDEO'}</Text>
               </View>
               <Text style={styles.hashText} numberOfLines={1}>
                 {new Date(clip.capturedAt).toLocaleString()} · {fileSizeBytes > 0 ? (fileSizeBytes / 1048576).toFixed(1) : '1.8'} MB
@@ -101,7 +103,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             </View>
             <View style={styles.exportTag}>
               <Download size={12} color={Colors.textMuted} />
-              <Text style={styles.exportText}>Local draft</Text>
+              <Text style={styles.exportText}>{isUrdu ? 'مقامی ڈرافٹ' : 'Local draft'}</Text>
             </View>
           </View>
         </View>
@@ -118,12 +120,14 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             <Lock size={18} color="#000" />
           )}
           <Text style={styles.submitText}>
-            {submitting ? 'Analyzing & Submitting to Private Vault…' : 'Submit to Private Vault'}
+            {submitting
+              ? (isUrdu ? 'تجزیہ اور والٹ میں جمع ہو رہا ہے…' : 'Analyzing & Submitting to Private Vault…')
+              : (isUrdu ? 'نجی والٹ میں جمع کرائیں' : 'Submit to Private Vault')}
           </Text>
         </TouchableOpacity>
 
         <Text style={styles.footerNote}>
-          Your report is analyzed by Qwen 2.5-VL and securely registered in your civic Evidence Vault.
+          {isUrdu ? 'آپ کی رپورٹ کا خودکار مصنوعی ذہانت (AI) سے تجزیہ کیا جاتا ہے اور شواہد والٹ میں محفوظ کیا جاتا ہے۔' : 'Your report is analyzed by AI and securely registered in your civic Evidence Vault.'}
         </Text>
         {!!error && <Text accessibilityRole="alert" style={{ color: colors.signal, marginTop: 8, textAlign: 'center' }}>{error}</Text>}
       </ScrollView>

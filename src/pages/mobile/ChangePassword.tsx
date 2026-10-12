@@ -1,4 +1,5 @@
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { ChevronLeft, KeyRound, Eye, EyeOff, CheckCircle2 } from 'lucide-react-native';
@@ -11,6 +12,7 @@ interface ChangePasswordProps {
 
 export function ChangePassword({ onBack }: ChangePasswordProps) {
   const { colors, resolvedTheme } = useTheme();
+  const { t, isUrdu } = useLanguage();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -24,11 +26,11 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
 
   const handleSubmit = async () => {
     if (newPassword.length < 6) {
-      Alert.alert('Password Too Short', 'Password must be at least 6 characters long.');
+      Alert.alert(t('passwordShortTitle'), t('passwordShortMsg'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert('Mismatch', 'New password and confirm password do not match.');
+      Alert.alert(t('passwordMismatchTitle'), t('passwordMismatchMsg'));
       return;
     }
 
@@ -39,17 +41,17 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
       });
 
       if (error) {
-        Alert.alert('Update Failed', error.message);
+        Alert.alert(t('updateFailed'), error.message);
         return;
       }
 
       Alert.alert(
-        'Password Updated',
-        'Your account password has been updated successfully.',
-        [{ text: 'OK', onPress: onBack }]
+        t('passwordUpdatedTitle'),
+        t('passwordUpdatedSuccess'),
+        [{ text: t('ok'), onPress: onBack }]
       );
     } catch (e) {
-      Alert.alert('Update Failed', e instanceof Error ? e.message : 'Please try again.');
+      Alert.alert(t('updateFailed'), e instanceof Error ? e.message : 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -61,9 +63,9 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
       <View style={[styles.header, { backgroundColor: colors.canvas, borderBottomColor: colors.edge }]}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <ChevronLeft size={20} color={colors.muted} />
-          <Text style={[styles.backText, { color: colors.muted }]}>Back to Settings</Text>
+          <Text style={[styles.backText, { color: colors.muted }]}>{t('backToSettings')}</Text>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.ink }]}>Change Password</Text>
+        <Text style={[styles.headerTitle, { color: colors.ink }]}>{t('changePassword')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -74,21 +76,21 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
             <KeyRound size={20} color={colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.bannerTitle, { color: colors.ink }]}>Update Account Credentials</Text>
-            <Text style={[styles.bannerSub, { color: colors.muted }]}>Set a strong password of at least 6 characters to secure your citizen reporter account.</Text>
+            <Text style={[styles.bannerTitle, { color: colors.ink }]}>{t('securityBannerTitle')}</Text>
+            <Text style={[styles.bannerSub, { color: colors.muted }]}>{t('securityBannerSub')}</Text>
           </View>
         </View>
 
         {/* New Password */}
         <View style={styles.inputGroup}>
-          <Text style={[styles.label, { color: colors.ink }]}>New Password</Text>
+          <Text style={[styles.label, { color: colors.ink }]}>{t('newPassword')}</Text>
           <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
             <TextInput
               style={[styles.input, { color: colors.ink }]}
               secureTextEntry={!showNew}
               value={newPassword}
               onChangeText={setNewPassword}
-              placeholder="At least 6 characters"
+              placeholder={t('passwordPlaceholder')}
               placeholderTextColor={colors.muted}
             />
             <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowNew(!showNew)}>
@@ -100,11 +102,11 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
         {/* Confirm Password */}
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
-            <Text style={[styles.label, { color: colors.ink }]}>Confirm New Password</Text>
+            <Text style={[styles.label, { color: colors.ink }]}>{t('confirmNewPassword')}</Text>
             {isMatched && (
               <View style={styles.matchGroup}>
                 <CheckCircle2 size={12} color={colors.valid} />
-                <Text style={[styles.matchText, { color: colors.valid }]}>Passwords match</Text>
+                <Text style={[styles.matchText, { color: colors.valid }]}>{isUrdu ? 'پاس ورڈز ایک جیسے ہیں' : 'Passwords match'}</Text>
               </View>
             )}
           </View>
@@ -114,7 +116,7 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
               secureTextEntry={!showConfirm}
               value={confirmPassword}
               onChangeText={setConfirmPassword}
-              placeholder="Re-enter new password"
+              placeholder={isUrdu ? 'دوبارہ نیا پاس ورڈ درج کریں' : 'Re-enter new password'}
               placeholderTextColor={colors.muted}
             />
             <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowConfirm(!showConfirm)}>
@@ -134,7 +136,7 @@ export function ChangePassword({ onBack }: ChangePasswordProps) {
           ) : (
             <>
               <KeyRound size={18} color="#000" />
-              <Text style={styles.submitText}>Save New Password</Text>
+              <Text style={styles.submitText}>{t('updatePassword')}</Text>
             </>
           )}
         </TouchableOpacity>

@@ -1,4 +1,5 @@
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 import { ChevronLeft, Search, CheckCircle2, AlertTriangle, Car } from 'lucide-react-native';
@@ -22,6 +23,7 @@ const registry: Record[] = [];
 
 export function PlateSearch({ onBack }: PlateSearchProps) {
   const { colors, resolvedTheme } = useTheme();
+  const { t, isUrdu } = useLanguage();
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<Record | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -45,17 +47,17 @@ export function PlateSearch({ onBack }: PlateSearchProps) {
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <ChevronLeft size={20} color={Colors.textMuted} />
-          <Text style={styles.backText}>Back to Safety</Text>
+          <Text style={styles.backText}>{t('backToSafety')}</Text>
         </TouchableOpacity>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>REGISTRY PENDING</Text>
+          <Text style={styles.badgeText}>{t('registryPending')}</Text>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Check a plate before you buy</Text>
+        <Text style={styles.title}>{t('checkPlateBeforeBuy')}</Text>
         <Text style={styles.subtitle}>
-          Official plate records are not connected yet. This screen cannot confirm clearance.
+          {t('plateSearchSubtitle')}
         </Text>
 
         {/* Search Bar */}

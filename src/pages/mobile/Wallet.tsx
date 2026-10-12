@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Banknote, ArrowUpRight, Clock, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { Colors } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
 import { useUserProfile } from '../../contexts/UserContext';
@@ -23,6 +24,7 @@ interface WalletProps {
 export function Wallet({ onSelectFine }: WalletProps) {
   const { colors } = useTheme();
   const { profile } = useUserProfile();
+  const { t, isUrdu } = useLanguage();
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const [loadError, setLoadError] = useState('');
 
@@ -56,28 +58,30 @@ export function Wallet({ onSelectFine }: WalletProps) {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={[styles.title, { color: colors.ink }]}>Citizen Wallet</Text>
-        <Text style={[styles.subtitle, { color: colors.muted }]}>Reward balance & citations {profile.plate ? `against ${profile.plate}` : 'for your account'}</Text>
+        <Text style={[styles.title, { color: colors.ink }]}>{t('citizenWallet')}</Text>
+        <Text style={[styles.subtitle, { color: colors.muted }]}>
+          {profile.plate ? (isUrdu ? `${profile.plate} پر چالان اور انعامی رقم` : `Reward balance & citations against ${profile.plate}`) : t('walletSubtitle')}
+        </Text>
 
         {/* Reward Card */}
         <View style={[styles.rewardCard, { backgroundColor: colors.surface, borderColor: 'rgba(245, 158, 11, 0.3)' }]}>
           <View style={styles.rewardHeader}>
             <View style={styles.rewardTitleRow}>
               <Banknote size={16} color={colors.accent} />
-              <Text style={[styles.rewardLabel, { color: colors.muted }]}>REWARD & CITIZEN BALANCE</Text>
+              <Text style={[styles.rewardLabel, { color: colors.muted }]}>{t('rewardBalance')}</Text>
             </View>
             <View style={styles.badgeEpay}>
-              <Text style={[styles.badgeEpayText, { color: colors.accent }]}>{wallet?.epay_linked ? 'e-Pay linked' : 'Active Account'}</Text>
+              <Text style={[styles.badgeEpayText, { color: colors.accent }]}>{wallet?.epay_linked ? t('epayLinked') : t('activeAccount')}</Text>
             </View>
           </View>
 
           <Text style={[styles.rewardAmount, { color: colors.ink }]}>{wallet ? `PKR ${(wallet.balance ?? 0).toLocaleString()}` : 'PKR 500'}</Text>
-          <Text style={[styles.rewardSub, { color: colors.muted }]}>{wallet ? `PKR ${(wallet.pending_clearance ?? 0).toLocaleString()} pending clearance` : 'Loading wallet…'}</Text>
+          <Text style={[styles.rewardSub, { color: colors.muted }]}>{wallet ? `PKR ${(wallet.pending_clearance ?? 0).toLocaleString()} ${t('pendingClearance')}` : t('loadingWallet')}</Text>
 
           {/* Quick Test Top Up Buttons */}
           <View style={{ marginTop: 14 }}>
             <Text style={{ fontSize: 10, fontWeight: '800', color: colors.muted, letterSpacing: 0.5, marginBottom: 8 }}>
-              QUICK TEST RECHARGE (ADD FUNDS):
+              {t('quickRecharge')}
             </Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity
@@ -105,20 +109,20 @@ export function Wallet({ onSelectFine }: WalletProps) {
           </View>
 
           <TouchableOpacity style={[styles.withdrawBtn, { backgroundColor: colors.accent, opacity: 0.5, marginTop: 14 }]} disabled activeOpacity={0.85}>
-            <Text style={[styles.withdrawText, { color: colors.canvas }]}>Withdrawal unavailable</Text>
+            <Text style={[styles.withdrawText, { color: colors.canvas }]}>{t('withdrawUnavailable')}</Text>
             <ArrowUpRight size={16} color={colors.canvas} />
           </TouchableOpacity>
         </View>
 
         {/* Citations section */}
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.ink }]}>Citations {profile.plate ? `against ${profile.plate}` : ''}</Text>
-          <Text style={[styles.activeBadgeText, { color: colors.signal }]}>Unavailable</Text>
+          <Text style={[styles.sectionTitle, { color: colors.ink }]}>{t('citations')} {profile.plate ? `(${profile.plate})` : ''}</Text>
+          <Text style={[styles.activeBadgeText, { color: colors.signal }]}>{t('unavailable')}</Text>
         </View>
 
         <View style={styles.finesList}>
           <View style={[styles.fineCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
-            <Text style={[styles.fineSub, { color: colors.muted }]}>Government citation data is not connected yet. No sample fines are shown.</Text>
+            <Text style={[styles.fineSub, { color: colors.muted }]}>{t('noCitations')}</Text>
           </View>
         </View>
         {!!loadError && <Text accessibilityRole="alert" style={{ color: colors.signal }}>{loadError}</Text>}

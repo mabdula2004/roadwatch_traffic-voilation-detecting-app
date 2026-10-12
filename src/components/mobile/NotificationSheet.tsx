@@ -17,6 +17,7 @@ import {
 } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export interface AppNotification {
   id: string;
@@ -39,6 +40,7 @@ export function NotificationSheet({
   onClose,
 }: NotificationSheetProps) {
   const { colors } = useTheme();
+  const { t, isUrdu } = useLanguage();
 
   return (
     <Modal
@@ -56,9 +58,9 @@ export function NotificationSheet({
           <View style={styles.header}>
             <View style={styles.titleGroup}>
               <Bell size={18} color={colors.telemetry} />
-              <Text style={[styles.title, { color: colors.ink }]}>Notifications & Alerts</Text>
+              <Text style={[styles.title, { color: colors.ink }]}>{t('notificationsAlerts')}</Text>
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>0 new</Text>
+                <Text style={styles.badgeText}>{isUrdu ? '0 نئی' : '0 new'}</Text>
               </View>
             </View>
             <TouchableOpacity
@@ -76,7 +78,7 @@ export function NotificationSheet({
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {defaultNotifications.length === 0 && <Text style={{ color: colors.muted, padding: 20 }}>No notifications available yet.</Text>}
+            {defaultNotifications.length === 0 && <Text style={{ color: colors.muted, padding: 20 }}>{t('noNotifications')}</Text>}
             {defaultNotifications.map((n) => {
               const isAlert = n.type === 'alert';
               const isSuccess = n.type === 'success';

@@ -32,6 +32,7 @@ import {
   CreditCard,
 } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { Colors } from '../../constants/theme';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
 import { CapturedClip, updateReportStatus } from '../../lib/report';
@@ -53,6 +54,7 @@ export function ReportOutcome({
   onGoToWallet,
 }: ReportOutcomeProps) {
   const { colors } = useTheme();
+  const { t, isUrdu } = useLanguage();
 
   // Wallet & Manual Review State
   const [walletBalance, setWalletBalance] = useState<number>(500);
@@ -459,13 +461,13 @@ export function ReportOutcome({
         <View style={styles.actionContainer}>
           <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.telemetry }]} onPress={onGoToVault}>
             <HardDrive size={18} color="#000" />
-            <Text style={styles.primaryBtnText}>Proceed to Evidence Vault</Text>
+            <Text style={styles.primaryBtnText}>{isUrdu ? 'شواہد والٹ پر جائیں' : 'Proceed to Evidence Vault'}</Text>
             <ChevronRight size={18} color="#000" />
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.edge }]} onPress={onRecordAnother}>
             <Camera size={16} color={colors.ink} />
-            <Text style={[styles.secondaryBtnText, { color: colors.ink }]}>Record Another Violation</Text>
+            <Text style={[styles.secondaryBtnText, { color: colors.ink }]}>{isUrdu ? 'ایک اور ویڈیو ریکارڈ کریں' : 'Record Another Violation'}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
