@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   Scale,
   X,
+  ChevronLeft,
   ChevronRight,
   Maximize2,
   MapPin,
@@ -88,7 +89,19 @@ export function Vault() {
 
   // Evidentiary Detail Dossier & Full-Screen Zoom Lightbox States
   const [selectedReport, setSelectedReport] = useState<ReportRow | null>(null);
-  const [zoomFrame, setZoomFrame] = useState<{ uri: string; label: string } | null>(null);
+  const [zoomFrameIndex, setZoomFrameIndex] = useState<number | null>(null);
+  const vaultLightboxScrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (zoomFrameIndex !== null) {
+      setTimeout(() => {
+        vaultLightboxScrollRef.current?.scrollTo({
+          x: zoomFrameIndex * SCREEN_WIDTH,
+          animated: false,
+        });
+      }, 50);
+    }
+  }, [zoomFrameIndex !== null]);
 
   // Screen Clean-up & Batch Selection Deletion States
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -975,12 +988,7 @@ export function Vault() {
                             },
                           ]}
                           activeOpacity={0.85}
-                          onPress={() => setZoomFrame({
-                            uri: fUri,
-                            label: isVioMoment
-                              ? (isUrdu ? `فریم #${idx + 1} (⚡ خلاف ورزی کا فیصلہ کن لمحہ)` : `Frame #${idx + 1} (⚡ Decisive Violation Moment)`)
-                              : `Frame #${idx + 1} (${timePct}% · ${phaseLabel})`,
-                          })}
+                          onPress={() => setZoomFrameIndex(idx)}
                         >
                           <Image
                             source={{ uri: fUri }}
@@ -1355,48 +1363,166 @@ export function Vault() {
       </Modal>
 
       {/* =========================================================================
-          FULL-SCREEN HIGH-RES LIGHTBOX MODAL (Tap to zoom any of the 3 frames)
+          FULL-SCREEN HIGH-RES LIGHTBOX MODAL (Side-Slide Horizontal Carousel)
           ========================================================================= */}
       <Modal
-        visible={!!zoomFrame}
+        visible={zoomFrameIndex !== null && !!selectedReport && !!selectedReport.frame_uris && selectedReport.frame_uris.length > 0}
         animationType="fade"
         transparent={true}
-        onRequestClose={() => setZoomFrame(null)}
+        onRequestClose={() => setZoomFrameIndex(null)}
       >
-        <View style={styles.lightboxBackdrop}>
-          <SafeAreaView style={styles.lightboxSafeArea}>
-            <View style={styles.lightboxHeader}>
-              <View style={styles.lightboxPill}>
-                <Text style={styles.lightboxPillText}>{zoomFrame?.label}</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.lightboxCloseBtn}
-                onPress={() => setZoomFrame(null)}
-                activeOpacity={0.7}
-              >
-                <X size={20} color="#ffffff" />
-              </TouchableOpacity>
-            </View>
+        {(() => {
+          const vaultFrames = selectedReport?.frame_uris || [];
+          const activeIdx = zoomFrameIndex ?? 0;
+          const isVio =
+            selectedReport &&
+            (selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected)) &&
+            activeIdx === ((selectedReport.ai_result?.violationFrameIndex ?? 2) - 1);
+          const tPct = activeIdx === 0 ? 30 : activeIdx === 1 ? 55 : 80;
+          const phaseLbl = isVio
+            ? (isUrdu ? '⚡ خلاف ورزی کا فیصلہ کن لمحہ' : '⚡ Decisive Violation Moment')
+            : activeIdx === 0
+            ? (isUrdu ? 'ابتدائی اپروچ اور پوزیشن' : 'Approach & Road Setup')
+            : (isUrdu ? 'نمبر پلیٹ و حتمی ثبوت' : 'Plate Track & Exit Proof');
 
-            <View style={styles.lightboxImageWrapper}>
-              {zoomFrame && (
-                <Image
-                  source={{ uri: zoomFrame.uri }}
-                  style={styles.lightboxImage}
-                  resizeMode="contain"
-                />
-              )}
-            </View>
+          return (
+            <View style={styles.lightboxBackdrop}>
+              <SafeAreaView style={styles.lightboxSafeArea}>
+                {/* Header */}
+                <View style={styles.lightboxHeader}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View
+                        style={[
+                          styles.lightboxPill,
+                          isVio && { backgroundColor: '#ef4444' },
+                        ]}
+                      >
+                        <Text style={styles.lightboxPillText}>
+                          {isVio
+                            ? `⚡ Frame ${activeIdx + 1} of ${vaultFrames.length} · VIOLATION`
+                            : `Frame ${activeIdx + 1} of ${vaultFrames.length}`}
+                        </Text>
+                      </View>
+                      <Text style={styles.lightboxTimelineText}>{tPct}% Timeline</Text>
+                    </View>
+                    <Text style={styles.lightboxSubText} numberOfLines={1}>
+                      {phaseLbl}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.lightboxCloseBtn}
+                    onPress={() => setZoomFrameIndex(null)}
+                    activeOpacity={0.7}
+                  >
+                    <X size={20} color="#ffffff" />
+                  </TouchableOpacity>
+                </View>
 
-            <View style={styles.lightboxFooter}>
-              <Text style={styles.lightboxFooterText}>
-                {isUrdu
-                  ? 'ہائی ریزولوشن ثبوتی فریم · نمبر پلیٹ اور گاڑی کی پوزیشن چیک کریں'
-                  : 'High-Resolution Video Keyframe · Vehicle & Plate Forensic Inspection'}
-              </Text>
+                {/* Horizontal Side-Slide Carousel */}
+                <View style={styles.lightboxCarouselWrapper}>
+                  <ScrollView
+                    ref={vaultLightboxScrollRef}
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onMomentumScrollEnd={(e) => {
+                      const nextIdx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                      if (nextIdx >= 0 && nextIdx < vaultFrames.length) {
+                        setZoomFrameIndex(nextIdx);
+                      }
+                    }}
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ alignItems: 'center' }}
+                  >
+                    {vaultFrames.map((fUri, idx) => (
+                      <View
+                        key={idx}
+                        style={{
+                          width: SCREEN_WIDTH,
+                          height: '100%',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          paddingHorizontal: 8,
+                        }}
+                      >
+                        <Image
+                          source={{ uri: fUri }}
+                          style={styles.lightboxImage}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ))}
+                  </ScrollView>
+
+                  {/* Floating Left Arrow */}
+                  {zoomFrameIndex !== null && zoomFrameIndex > 0 && (
+                    <TouchableOpacity
+                      style={[styles.floatingNavBtn, styles.floatingNavLeft]}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        const prev = zoomFrameIndex - 1;
+                        setZoomFrameIndex(prev);
+                        vaultLightboxScrollRef.current?.scrollTo({ x: prev * SCREEN_WIDTH, animated: true });
+                      }}
+                    >
+                      <ChevronLeft size={22} color="#ffffff" />
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Floating Right Arrow */}
+                  {zoomFrameIndex !== null && zoomFrameIndex < vaultFrames.length - 1 && (
+                    <TouchableOpacity
+                      style={[styles.floatingNavBtn, styles.floatingNavRight]}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        const next = zoomFrameIndex + 1;
+                        setZoomFrameIndex(next);
+                        vaultLightboxScrollRef.current?.scrollTo({ x: next * SCREEN_WIDTH, animated: true });
+                      }}
+                    >
+                      <ChevronRight size={22} color="#ffffff" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Footer with Pagination Dots & Instructions */}
+                <View style={styles.lightboxFooter}>
+                  {vaultFrames.length > 1 && (
+                    <View style={styles.lightboxDotsRow}>
+                      {vaultFrames.map((_, dotIdx) => {
+                        const isActive = dotIdx === zoomFrameIndex;
+                        const isDotVio =
+                          selectedReport &&
+                          (selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected)) &&
+                          dotIdx === ((selectedReport.ai_result?.violationFrameIndex ?? 2) - 1);
+                        return (
+                          <TouchableOpacity
+                            key={dotIdx}
+                            onPress={() => {
+                              setZoomFrameIndex(dotIdx);
+                              vaultLightboxScrollRef.current?.scrollTo({ x: dotIdx * SCREEN_WIDTH, animated: true });
+                            }}
+                            style={[
+                              styles.lightboxDot,
+                              isActive && styles.lightboxDotActive,
+                              isActive && isDotVio && { backgroundColor: '#ef4444', width: 22 },
+                            ]}
+                          />
+                        );
+                      })}
+                    </View>
+                  )}
+                  <Text style={styles.lightboxFooterText}>
+                    {isUrdu
+                      ? '👈 فریمز کو دائیں بائیں سلائیڈ کریں تاکہ تمام ثبوت دیکھ سکیں 👉'
+                      : '👈 Swipe sideways or tap arrows to inspect all evidence frames 👉'}
+                  </Text>
+                </View>
+              </SafeAreaView>
             </View>
-          </SafeAreaView>
-        </View>
+          );
+        })()}
       </Modal>
     </SafeAreaView>
   );
@@ -2052,8 +2178,60 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  lightboxCarouselWrapper: {
+    flex: 1,
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  floatingNavBtn: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -22,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  floatingNavLeft: {
+    left: 12,
+  },
+  floatingNavRight: {
+    right: 12,
+  },
+  lightboxDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  lightboxDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  lightboxDotActive: {
+    width: 22,
+    backgroundColor: Colors.telemetry,
+  },
+  lightboxTimelineText: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  lightboxSubText: {
+    color: '#d1d5db',
+    fontSize: 12,
+    marginTop: 2,
+  },
   lightboxImage: {
-    width: SCREEN_WIDTH,
+    width: SCREEN_WIDTH - 16,
     height: '100%',
   },
   lightboxFooter: {

@@ -97,12 +97,14 @@ async function extractVideoFrames(videoUri?: string, durationMs: number = 5000):
     await new Promise(r => setTimeout(r, 200));
 
     const dur = Math.max(durationMs, 5000);
-    // Sample 2 decisive evidentiary moments:
-    // Frame 1: Decisive focal moment (55% duration, optimal focus & infraction)
-    // Frame 2: Approach & initial road positioning (35% duration)
+    // Sample 3 representative evidentiary moments:
+    // Frame 1: Approach & initial road positioning (30% duration)
+    // Frame 2: Decisive focal moment (55% duration, optimal focus & infraction)
+    // Frame 3: Plate track & exit (80% duration)
     const times = [
+      Math.max(700, Math.floor(dur * 0.30)),
       Math.max(2000, Math.floor(dur * 0.55)),
-      Math.max(700, Math.floor(dur * 0.35)),
+      Math.min(dur - 500, Math.floor(dur * 0.80)),
     ];
 
     for (const time of times) {
@@ -225,8 +227,8 @@ Output ONLY valid JSON:
   "reasoning": string
 }`;
 
-  // Primary decisive violation keyframe (~414 tokens, fits safely within limit!)
-  const primaryFrame = frames[0];
+  // Primary decisive violation keyframe (~55% focal duration point)
+  const primaryFrame = frames.length > 1 ? frames[1] : frames[0];
   const userContent: any[] = [
     { type: 'text', text: prompt },
     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${primaryFrame}` } },
@@ -240,10 +242,10 @@ Output ONLY valid JSON:
     try {
       const modelToUse = AI_MODEL;
       let effectiveContent = userContent;
-      if (attempt > 0 && frames.length > 1) {
+      if (attempt > 0 && frames.length > 0) {
         effectiveContent = [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[1]}` } },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[0]}` } },
         ];
       }
 
@@ -467,18 +469,22 @@ function formatResult(
     : (status === 'fined' ? 2 : 1);
 
   // Proving evidentiary frame(s):
-  // Preserve and display ONLY the decisive frame where violation is proven!
+  // Preserve and display ALL inspected keyframes so user/officer can slide sideways!
   const safeFrames = framesBase64 || [];
-  const decisiveFrames = safeFrames.length > 0 ? [safeFrames[0]] : [];
+  const decisiveFrames = safeFrames.slice(0, 3);
 
   let frameDescriptions: string[] = [];
   if (status === 'fined') {
     frameDescriptions = [
-      `⚡ DECISIVE EVIDENCE: ${violationMeta?.name || 'Violation Confirmed'}`,
+      'Frame 1: Approach & initial road positioning',
+      `Frame 2: ⚡ DECISIVE EVIDENCE: ${violationMeta?.name || 'Violation Confirmed'}`,
+      'Frame 3: Plate tracking & vehicle exit',
     ];
   } else {
     frameDescriptions = [
-      'Evidentiary Traffic Frame (Lawful)',
+      'Frame 1: Initial road tracking',
+      'Frame 2: Inspected position (Lawful)',
+      'Frame 3: Normal traffic movement',
     ];
   }
 
@@ -510,7 +516,7 @@ function formatResult(
     analyzedAt: new Date().toISOString(),
     locationName,
     framesBase64: decisiveFrames,
-    violationFrameIndex: 1,
+    violationFrameIndex: violationFrameIndex,
     frameDescriptions,
   };
 }

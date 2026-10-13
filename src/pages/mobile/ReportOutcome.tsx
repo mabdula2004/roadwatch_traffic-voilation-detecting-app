@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Image,
   Modal,
+  Dimensions,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +25,7 @@ import {
   Hash,
   Scale,
   Sparkles,
+  ChevronLeft,
   ChevronRight,
   Maximize2,
   UserCheck,
@@ -38,6 +40,8 @@ import { Colors } from '../../constants/theme';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
 import { CapturedClip, updateReportStatus, saveLocalReport, getLocalReports, saveFramesToDisk } from '../../lib/report';
 import { getWalletBalance, deductWalletBalance, rechargeWalletBalance } from '../../lib/wallet';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface ReportOutcomeProps {
   clip: CapturedClip;
@@ -61,12 +65,24 @@ export function ReportOutcome({
 
   // Wallet & Manual Review State
   const [walletBalance, setWalletBalance] = useState<number>(500);
-  const [selectedZoomFrame, setSelectedZoomFrame] = useState<{ b64: string; index: number; pct: number } | null>(null);
+  const [selectedZoomIndex, setSelectedZoomIndex] = useState<number | null>(null);
+  const lightboxScrollRef = useRef<ScrollView>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isManualSubmitted, setIsManualSubmitted] = useState(false);
   const [processingDeduction, setProcessingDeduction] = useState(false);
+
+  useEffect(() => {
+    if (selectedZoomIndex !== null) {
+      setTimeout(() => {
+        lightboxScrollRef.current?.scrollTo({
+          x: selectedZoomIndex * SCREEN_WIDTH,
+          animated: false,
+        });
+      }, 50);
+    }
+  }, [selectedZoomIndex !== null]);
 
   useEffect(() => {
     let alive = true;
@@ -347,7 +363,7 @@ export function ReportOutcome({
                       },
                     ]}
                     activeOpacity={0.85}
-                    onPress={() => setSelectedZoomFrame({ b64: frameB64, index: idx + 1, pct: timePct })}
+                    onPress={() => setSelectedZoomIndex(idx)}
                   >
                     <Image
                       source={{ uri: `data:image/jpeg;base64,${frameB64}` }}
@@ -573,37 +589,150 @@ export function ReportOutcome({
         </View>
       </ScrollView>
 
-      {/* MODAL 1: Full-Screen Zoom Frame Lightbox */}
-      <Modal visible={!!selectedZoomFrame} transparent animationType="fade" onRequestClose={() => setSelectedZoomFrame(null)}>
-        <View style={styles.modalBackdrop}>
-          <SafeAreaView style={styles.lightboxContainer}>
-            <View style={styles.lightboxHeader}>
-              <View>
-                <Text style={styles.lightboxTitle}>Frame {selectedZoomFrame?.index} of {frames.length}</Text>
-                <Text style={styles.lightboxSub}>Extracted at {selectedZoomFrame?.pct}% of video timeline</Text>
-              </View>
-              <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedZoomFrame(null)}>
-                <X size={20} color="#fff" />
-              </TouchableOpacity>
-            </View>
+      {/* MODAL 1: Full-Screen Zoom Frame Lightbox with Side-Slide Carousel */}
+      <Modal visible={selectedZoomIndex !== null} transparent animationType="fade" onRequestClose={() => setSelectedZoomIndex(null)}>
+        {(() => {
+          const activeIdx = selectedZoomIndex ?? 0;
+          const isVio =
+            aiResult.violationDetected &&
+            activeIdx === ((aiResult.violationFrameIndex ?? 2) - 1);
+          const tPct = activeIdx === 0 ? 30 : activeIdx === 1 ? 55 : 80;
+          const customDesc = aiResult.frameDescriptions?.[activeIdx];
 
-            {selectedZoomFrame && (
-              <View style={styles.lightboxImageWrapper}>
-                <Image
-                  source={{ uri: `data:image/jpeg;base64,${selectedZoomFrame.b64}` }}
-                  style={styles.lightboxImage}
-                  resizeMode="contain"
-                />
-              </View>
-            )}
+          return (
+            <View style={styles.modalBackdrop}>
+              <SafeAreaView style={styles.lightboxContainer}>
+                {/* Header */}
+                <View style={styles.lightboxHeader}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View
+                        style={[
+                          styles.lightboxFrameBadge,
+                          isVio && { backgroundColor: '#ef4444' },
+                        ]}
+                      >
+                        <Text style={styles.lightboxFrameBadgeText}>
+                          {isVio
+                            ? `⚡ Frame ${activeIdx + 1} of ${frames.length} · VIOLATION`
+                            : `Frame ${activeIdx + 1} of ${frames.length}`}
+                        </Text>
+                      </View>
+                      <Text style={styles.lightboxTimelineText}>{tPct}% timeline</Text>
+                    </View>
+                    <Text style={styles.lightboxSub} numberOfLines={1}>
+                      {customDesc || (isVio ? 'Decisive evidence moment' : 'Traffic alignment frame')}
+                    </Text>
+                  </View>
+                  <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedZoomIndex(null)} activeOpacity={0.7}>
+                    <X size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
 
-            <View style={styles.lightboxFooter}>
-              <Text style={styles.lightboxFooterText}>
-                Inspected by Qwen 2.5-VL Vision Model for license plate legibility and traffic compliance.
-              </Text>
+                {/* Horizontal Side-Slide Carousel */}
+                <View style={styles.lightboxCarouselWrapper}>
+                  <ScrollView
+                    ref={lightboxScrollRef}
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onMomentumScrollEnd={(e) => {
+                      const nextIdx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                      if (nextIdx >= 0 && nextIdx < frames.length) {
+                        setSelectedZoomIndex(nextIdx);
+                      }
+                    }}
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ alignItems: 'center' }}
+                  >
+                    {frames.map((frameB64, idx) => (
+                      <View
+                        key={idx}
+                        style={{
+                          width: SCREEN_WIDTH,
+                          height: '100%',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          paddingHorizontal: 8,
+                        }}
+                      >
+                        <Image
+                          source={{ uri: `data:image/jpeg;base64,${frameB64}` }}
+                          style={styles.lightboxImage}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ))}
+                  </ScrollView>
+
+                  {/* Floating Left Arrow */}
+                  {selectedZoomIndex !== null && selectedZoomIndex > 0 && (
+                    <TouchableOpacity
+                      style={[styles.floatingNavBtn, styles.floatingNavLeft]}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        const prev = selectedZoomIndex - 1;
+                        setSelectedZoomIndex(prev);
+                        lightboxScrollRef.current?.scrollTo({ x: prev * SCREEN_WIDTH, animated: true });
+                      }}
+                    >
+                      <ChevronLeft size={22} color="#ffffff" />
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Floating Right Arrow */}
+                  {selectedZoomIndex !== null && selectedZoomIndex < frames.length - 1 && (
+                    <TouchableOpacity
+                      style={[styles.floatingNavBtn, styles.floatingNavRight]}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        const next = selectedZoomIndex + 1;
+                        setSelectedZoomIndex(next);
+                        lightboxScrollRef.current?.scrollTo({ x: next * SCREEN_WIDTH, animated: true });
+                      }}
+                    >
+                      <ChevronRight size={22} color="#ffffff" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Footer with Pagination Dots & Guidance */}
+                <View style={styles.lightboxFooter}>
+                  {frames.length > 1 && (
+                    <View style={styles.lightboxDotsRow}>
+                      {frames.map((_, dotIdx) => {
+                        const isActive = dotIdx === selectedZoomIndex;
+                        const isDotVio =
+                          aiResult.violationDetected &&
+                          dotIdx === ((aiResult.violationFrameIndex ?? 2) - 1);
+                        return (
+                          <TouchableOpacity
+                            key={dotIdx}
+                            onPress={() => {
+                              setSelectedZoomIndex(dotIdx);
+                              lightboxScrollRef.current?.scrollTo({ x: dotIdx * SCREEN_WIDTH, animated: true });
+                            }}
+                            style={[
+                              styles.lightboxDot,
+                              isActive && styles.lightboxDotActive,
+                              isActive && isDotVio && { backgroundColor: '#ef4444', width: 22 },
+                            ]}
+                          />
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  <Text style={styles.lightboxFooterText}>
+                    {isUrdu
+                      ? '👈 فریمز کو دائیں بائیں سلائیڈ کریں تاکہ تمام ثبوت دیکھ سکیں 👉'
+                      : '👈 Swipe sideways or tap arrows to inspect all evidence frames 👉'}
+                  </Text>
+                </View>
+              </SafeAreaView>
             </View>
-          </SafeAreaView>
-        </View>
+          );
+        })()}
       </Modal>
 
       {/* MODAL 2: Confirm Manual Review Deduction Modal */}
@@ -1136,22 +1265,81 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 20,
   },
+  lightboxCarouselWrapper: {
+    flex: 1,
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  floatingNavBtn: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -22,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  floatingNavLeft: {
+    left: 12,
+  },
+  floatingNavRight: {
+    right: 12,
+  },
+  lightboxDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  lightboxDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  lightboxDotActive: {
+    width: 22,
+    backgroundColor: Colors.telemetry,
+  },
+  lightboxFrameBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  lightboxFrameBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  lightboxTimelineText: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   lightboxImageWrapper: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   lightboxImage: {
-    width: '100%',
-    height: '80%',
+    width: SCREEN_WIDTH - 16,
+    height: '100%',
   },
   lightboxFooter: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
   lightboxFooterText: {
-    color: '#9ca3af',
-    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 11,
     textAlign: 'center',
   },
 
