@@ -49,11 +49,7 @@ function formatPakPhone(raw: string): string {
 const cnicValid = (v: string) => v.replace(/\D/g, '').length === 13;
 const emailValid = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
-const safetyPoints = [
-  'Stop safely before recording. Never hold the phone while driving.',
-  'Your report and identity are protected by account access controls.',
-  'Only upload footage that you are permitted to share.',
-];
+
 
 interface OnboardingProps {
   onComplete: () => void;
@@ -70,14 +66,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [cnic, setCnic] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [vehicle, setVehicle] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [otp, setOtp] = useState('');
   const [resendIn, setResendIn] = useState(0);
-  const [agreed, setAgreed] = useState(false);
   const [sentEmail, setSentEmail] = useState('');
   const [verifiedEmail, setVerifiedEmail] = useState('');
 
@@ -119,7 +113,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           if (draft.name && !name) setName(draft.name);
           if (draft.cnic && !cnic) setCnic(draft.cnic);
           if (draft.phone && !phone) setPhone(draft.phone);
-          if (draft.vehicle && !vehicle) setVehicle(draft.vehicle);
           if (draft.email && !email) setEmail(draft.email);
         } catch {}
       }
@@ -140,7 +133,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     // Persist draft to storage
     await AsyncStorage.setItem(
       ONBOARDING_TEMP_STORAGE_KEY,
-      JSON.stringify({ name, cnic, phone, vehicle, email: email.trim() })
+      JSON.stringify({ name, cnic, phone, email: email.trim() })
     ).catch(() => {});
 
     try {
@@ -215,10 +208,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       setError('Passwords do not match.');
       return;
     }
-    if (!agreed) {
-      setError('Please agree to safety guidelines to continue.');
-      return;
-    }
 
     setBusy(true);
     setError('');
@@ -285,7 +274,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         email: targetEmail,
         phone: formattedPhone || phone.trim() || '',
         cnic: cnic.trim() || `••••••••${cnicLast4}`,
-        plate: vehicle.trim() || '',
+        plate: '',
       };
       await AsyncStorage.setItem('@roadwatch_user_profile', JSON.stringify(profileToCache)).catch(() => {});
       await AsyncStorage.removeItem(ONBOARDING_TEMP_STORAGE_KEY).catch(() => {});
@@ -308,7 +297,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         try {
           await supabase.from('reporter_profiles').upsert({
             reporter_id: currentUserId,
-            vehicle_plate: vehicle.trim() || null,
+            vehicle_plate: null,
           }, { onConflict: 'reporter_id' });
         } catch {}
 
@@ -317,7 +306,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             p_name: name.trim(),
             p_cnic: cnic,
             p_email: targetEmail,
-            p_vehicle_plate: vehicle.trim() || null,
+            p_vehicle_plate: null,
             p_phone: formattedPhone,
           });
         } catch {}
@@ -378,7 +367,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             try {
               await supabase.from('reporter_profiles').upsert({
                 reporter_id: signUpData.user.id,
-                vehicle_plate: 'LEA-4471',
+                vehicle_plate: null,
               });
             } catch {}
           }
@@ -430,7 +419,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           try {
             await supabase.from('reporter_profiles').upsert({
               reporter_id: signUpData.user.id,
-              vehicle_plate: 'LEA-4471',
+              vehicle_plate: null,
             });
           } catch {}
         }
@@ -514,8 +503,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     cnicValid(cnic) &&
     emailValid(email) &&
     isEmailVerified &&
-    passwordMatched &&
-    agreed;
+    passwordMatched;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -705,15 +693,15 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             {busy && <ActivityIndicator color={colors.telemetry} style={{ marginTop: 10 }} />}
           </View>
         ) : (
-          /* Sign Up Screen Flow */
+          /* Sign Up Screen Flow - Exactly 2 Blocks */
           <>
-            {/* Step 1: User Profile & Details */}
+            {/* Block 1: Identity & Email Verification */}
             <View style={styles.stepCard}>
               <View style={styles.stepHeader}>
-                <View style={[styles.stepBadge, (name.trim().length > 2 && cnicValid(cnic)) && styles.stepBadgeDone]}>
-                  {(name.trim().length > 2 && cnicValid(cnic)) ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>1</Text>}
+                <View style={[styles.stepBadge, (name.trim().length > 2 && cnicValid(cnic) && isEmailVerified) && styles.stepBadgeDone]}>
+                  {(name.trim().length > 2 && cnicValid(cnic) && isEmailVerified) ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>1</Text>}
                 </View>
-                <Text style={styles.stepTitle}>Personal & Vehicle Details</Text>
+                <Text style={styles.stepTitle}>Personal Details & Verification</Text>
               </View>
 
               <View style={styles.fieldGroup}>
@@ -765,31 +753,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     keyboardType="phone-pad"
                   />
                 </View>
-              </View>
-
-              <View style={styles.fieldGroup}>
-                <View style={styles.labelRow}>
-                  <Text style={styles.label}>Vehicle Plate Number</Text>
-                  <Text style={styles.optionalText}>Optional</Text>
-                </View>
-                <TextInput
-                  style={[styles.input, styles.plateInput]}
-                  value={vehicle}
-                  onChangeText={(val) => setVehicle(val.toUpperCase())}
-                  placeholder="e.g. LEA-4471"
-                  placeholderTextColor="#6b7280"
-                  autoCapitalize="characters"
-                />
-              </View>
-            </View>
-
-            {/* Step 2: Email & Verification Link */}
-            <View style={styles.stepCard}>
-              <View style={styles.stepHeader}>
-                <View style={[styles.stepBadge, isEmailVerified && styles.stepBadgeDone]}>
-                  {isEmailVerified ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>2</Text>}
-                </View>
-                <Text style={styles.stepTitle}>Email Verification Link</Text>
               </View>
 
               <View style={styles.fieldGroup}>
@@ -860,13 +823,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               )}
             </View>
 
-            {/* Step 3: Password & Safety Agreement */}
+            {/* Block 2: Set Password & Create Account */}
             <View style={styles.stepCard}>
               <View style={styles.stepHeader}>
-                <View style={[styles.stepBadge, passwordMatched && agreed && styles.stepBadgeDone]}>
-                  {(passwordMatched && agreed) ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>3</Text>}
+                <View style={[styles.stepBadge, passwordMatched && styles.stepBadgeDone]}>
+                  {passwordMatched ? <Check size={16} color={colors.valid} /> : <Text style={styles.stepNumber}>2</Text>}
                 </View>
-                <Text style={styles.stepTitle}>Set Password & Safety</Text>
+                <Text style={styles.stepTitle}>Account Password</Text>
               </View>
 
               <View style={styles.fieldGroup}>
@@ -909,28 +872,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     {showConfirmPassword ? <EyeOff size={18} color={Colors.muted} /> : <Eye size={18} color={Colors.muted} />}
                   </TouchableOpacity>
                 </View>
-              </View>
-
-              <View style={styles.safetyBox}>
-                <AlertTriangle size={20} color={colors.accent} />
-                <Text style={styles.safetyHeading}>Safety Guidelines</Text>
-                {safetyPoints.map((point, index) => (
-                  <View key={index} style={styles.bulletRow}>
-                    <View style={styles.bulletDot} />
-                    <Text style={styles.bulletText}>{point}</Text>
-                  </View>
-                ))}
-
-                <TouchableOpacity
-                  style={styles.checkboxRow}
-                  onPress={() => setAgreed(!agreed)}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
-                    {agreed && <Check size={14} color={colors.canvas} />}
-                  </View>
-                  <Text style={styles.checkboxLabel}>I understand and agree to report safely</Text>
-                </TouchableOpacity>
               </View>
 
               <TouchableOpacity

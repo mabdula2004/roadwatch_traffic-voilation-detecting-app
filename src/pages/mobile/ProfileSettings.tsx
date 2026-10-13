@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
-import { ChevronLeft, User, Phone, Mail, ShieldCheck, Car, Save, Lock } from 'lucide-react-native';
+import { ChevronLeft, User, Phone, Mail, ShieldCheck, Save, Lock } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -18,7 +18,6 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
   const [name, setName] = useState(profile.name);
   const [phone, setPhone] = useState(profile.phone);
   const [email, setEmail] = useState(profile.email);
-  const [plate, setPlate] = useState(profile.plate || '');
   const [saving, setSaving] = useState(false);
 
   // CNIC is permanently locked to 1 account and masked so only last 4 digits are visible
@@ -30,7 +29,6 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
     setName(profile.name);
     setPhone(profile.phone);
     setEmail(profile.email);
-    setPlate(profile.plate);
   }, [profile]);
 
   const handleSave = async () => {
@@ -44,7 +42,6 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
         name: name.trim(),
         email: email.trim(),
         phone: phone.trim(),
-        plate: plate.trim(),
       });
       Alert.alert(t('profileUpdated'), t('profileSavedSuccess'));
       onBack();
@@ -148,19 +145,6 @@ export function ProfileSettings({ onBack }: ProfileSettingsProps) {
           />
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={[styles.label, { color: colors.text }]}>
-            <Car size={13} color={colors.telemetry} /> {t('registeredPlate')}
-          </Text>
-          <TextInput
-            style={[styles.input, { letterSpacing: 1, fontWeight: '700', backgroundColor: colors.surface, borderColor: colors.edge, color: colors.text }]}
-            value={plate}
-            onChangeText={(text) => setPlate(text.toUpperCase())}
-            placeholder="e.g. LEA-4471"
-            placeholderTextColor={colors.muted}
-            autoCapitalize="characters"
-          />
-        </View>
 
         {/* Verified Badge Section */}
         <View style={[styles.verifiedCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
