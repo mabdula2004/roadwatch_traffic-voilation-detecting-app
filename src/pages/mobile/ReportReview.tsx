@@ -56,21 +56,7 @@ function formatTime(sec: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-type CropPreset = {
-  id: string;
-  label: string;
-  labelUrdu: string;
-  zoom: number;
-  desc: string;
-  descUrdu: string;
-};
 
-const CROP_PRESETS: CropPreset[] = [
-  { id: '1.0', label: '1.0x Full', labelUrdu: '1.0x مکمل سڑک', zoom: 1.0, desc: 'Original wide road view', descUrdu: 'اصل چوڑا منظر' },
-  { id: '1.3', label: '1.3x Lane', labelUrdu: '1.3x لین فوکس', zoom: 1.3, desc: 'Crops side distractions', descUrdu: 'ٹریفک لین پر فوکس' },
-  { id: '1.6', label: '1.6x Vehicle', labelUrdu: '1.6x گاڑی باکس', zoom: 1.6, desc: 'Isolates target vehicle', descUrdu: 'گاڑی پر قریبی کراپ' },
-  { id: '2.0', label: '2.0x Plate', labelUrdu: '2.0x پلیٹ زوم', zoom: 2.0, desc: 'Forensic close-up focus', descUrdu: 'نمبر پلیٹ پر گہرا زوم' },
-];
 
 export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const { colors } = useTheme();
@@ -88,8 +74,16 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const [filmstrip, setFilmstrip] = useState<string[]>([]);
   const [timelineWidth, setTimelineWidth] = useState<number>(SCREEN_WIDTH - 64);
 
-  // Video Crop & Framing State
-  const [cropPreset, setCropPreset] = useState<CropPreset>(CROP_PRESETS[0]);
+  // Touch-Adjustable Video Crop State (1.0x Full to 3.0x Zoom)
+  const [cropZoom, setCropZoom] = useState<number>(1.0);
+  const cropZoomRef = useRef<number>(1.0);
+  const dragCropZoomRef = useRef<number>(1.0);
+  const cropSliderWidthRef = useRef<number>(SCREEN_WIDTH - 64);
+  const [cropSliderWidth, setCropSliderWidth] = useState<number>(SCREEN_WIDTH - 64);
+
+  useEffect(() => {
+    cropZoomRef.current = cropZoom;
+  }, [cropZoom]);
 
   // Touch Drag Refs for Smooth PanResponder Interaction
   const trimStartSecRef = useRef<number>(0);
@@ -189,6 +183,42 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
     })
   ).current;
 
+  // Touch Drag Slider PanResponder for Crop Zoom
+  const cropSliderPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragCropZoomRef.current = cropZoomRef.current;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const width = cropSliderWidthRef.current;
+        if (width <= 0) return;
+        const delta = (gestureState.dx / width) * 2.0;
+        const next = Math.max(1.0, Math.min(3.0, dragCropZoomRef.current + delta));
+        const rounded = Math.round(next * 10) / 10;
+        setCropZoom(rounded);
+      },
+    })
+  ).current;
+
+  // Touch Resizing Frame PanResponder on Video
+  const cropFramePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragCropZoomRef.current = cropZoomRef.current;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const delta = -(gestureState.dx + gestureState.dy) / 80;
+        const next = Math.max(1.0, Math.min(3.0, dragCropZoomRef.current + delta));
+        const rounded = Math.round(next * 10) / 10;
+        setCropZoom(rounded);
+      },
+    })
+  ).current;
+
   // Fine-tune Steppers
   function adjustStart(delta: number) {
     const nextStart = Math.max(0, Math.min(trimStartSec + delta, trimEndSec - 5));
@@ -224,9 +254,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
     } catch {}
   }
 
-  function handleSelectCrop(preset: CropPreset) {
-    setCropPreset(preset);
-  }
+
 
   function handleRemakeVideo() {
     setShowRemakeModal(true);
@@ -245,8 +273,8 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         durationMs: effectiveDurationMs,
         trimStartMs: isTrimApplied ? Math.round(trimStartSec * 1000) : 0,
         trimEndMs: isTrimApplied ? Math.round(trimEndSec * 1000) : clip.durationMs,
-        cropZoom: cropPreset.zoom > 1.0 ? cropPreset.zoom : undefined,
-        cropLabel: cropPreset.zoom > 1.0 ? cropPreset.label : undefined,
+        cropZoom: cropZoom > 1.05 ? Number(cropZoom.toFixed(2)) : undefined,
+        cropLabel: cropZoom > 1.05 ? `${cropZoom.toFixed(1)}x Touch Crop` : undefined,
       };
 
       // 1. Attempt AI analysis with automatic offline resilience fallback
@@ -343,38 +371,46 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           </Text>
         </View>
 
-        {/* Video Card with Live Crop/Zoom Effect */}
+        {/* Video Card with Live Touch Crop/Zoom Effect */}
         <View style={styles.mediaCard}>
           <View style={styles.imageWrapper}>
-            <View style={[styles.videoCropContainer, { transform: [{ scale: cropPreset.zoom }] }]}>
+            <View style={[styles.videoCropContainer, { transform: [{ scale: cropZoom }] }]}>
               <VideoView player={player} style={styles.evidenceImage} nativeControls contentFit="cover" />
             </View>
 
-            {/* Overlaid Crop Reticle when Zoomed */}
-            {cropPreset.zoom > 1.0 && (
-              <View style={styles.cropReticleOverlay} pointerEvents="none">
-                <View style={styles.cropTargetBox}>
-                  <Crosshair size={28} color="rgba(6, 182, 212, 0.6)" />
-                </View>
-                <View style={styles.cropZoomPill}>
-                  <Crop size={11} color="#000" />
-                  <Text style={styles.cropZoomPillText}>{cropPreset.label.toUpperCase()}</Text>
+            {/* Interactive Touch-Adjustable Crop Frame (ONLY shown when Crop Tool is active) */}
+            {activeTool === 'crop' && (
+              <View style={styles.touchCropOverlay} pointerEvents="box-none">
+                <View
+                  style={[
+                    styles.cropInteractiveFrame,
+                    {
+                      width: `${Math.max(45, Math.min(92, 92 / cropZoom))}%`,
+                      height: `${Math.max(45, Math.min(92, 92 / cropZoom))}%`,
+                    },
+                  ]}
+                  {...cropFramePanResponder.panHandlers}
+                >
+                  {/* Rule of thirds grid */}
+                  <View style={styles.gridLineH1} />
+                  <View style={styles.gridLineH2} />
+                  <View style={styles.gridLineV1} />
+                  <View style={styles.gridLineV2} />
+
+                  {/* 4 Corner Touch Handles */}
+                  <View style={[styles.cornerBracket, styles.cornerTL]} />
+                  <View style={[styles.cornerBracket, styles.cornerTR]} />
+                  <View style={[styles.cornerBracket, styles.cornerBL]} />
+                  <View style={[styles.cornerBracket, styles.cornerBR]} />
+
+                  {/* Center Crop Zoom Indicator Pill */}
+                  <View style={styles.cropCenterPill}>
+                    <Crop size={12} color="#000" />
+                    <Text style={styles.cropCenterPillText}>{cropZoom.toFixed(1)}x</Text>
+                  </View>
                 </View>
               </View>
             )}
-
-            {/* Floating Badges */}
-            <View style={styles.imageFooter}>
-              <View style={styles.blurBadge}>
-                <EyeOff size={12} color={Colors.telemetry} />
-                <Text style={styles.blurBadgeText}>{isUrdu ? 'چہرہ خودکار دھندلا' : 'FACIAL AUTO-BLUR ACTIVE'}</Text>
-              </View>
-              <View style={[styles.timeTag, isTrimApplied && styles.timeTagTrimmed]}>
-                <Text style={[styles.timeText, isTrimApplied && { color: '#000', fontWeight: '800' }]}>
-                  {effectiveDurationSec}s {isTrimApplied ? '⚡ TRIMMED' : ''}
-                </Text>
-              </View>
-            </View>
           </View>
 
           {/* High-Contrast Interactive Edit Action Bar */}
@@ -406,9 +442,9 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             >
               <Crop size={15} color={activeTool === 'crop' ? '#000' : '#f59e0b'} />
               <Text style={[styles.toolTabText, activeTool === 'crop' ? { color: '#000' } : { color: '#f59e0b' }]}>
-                {isUrdu ? 'کراپ اور زوم (Crop)' : 'Crop Framing & Zoom'}
+                {isUrdu ? 'ٹچ سے کراپ کریں (Crop)' : 'Touch Crop & Zoom'}
               </Text>
-              {cropPreset.zoom > 1.0 && (
+              {cropZoom > 1.05 && (
                 <View style={[styles.appliedDot, { backgroundColor: '#f59e0b' }]} />
               )}
             </TouchableOpacity>
@@ -581,7 +617,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           )}
 
           {/* =========================================================================
-              TOOL 2: CROP & FRAMING ZOOM STUDIO
+              TOOL 2: TOUCH-ADJUSTABLE CROP & FRAMING ZOOM STUDIO
               ========================================================================= */}
           {activeTool === 'crop' && (
             <View style={[styles.trimStudioCard, { borderColor: 'rgba(245, 158, 11, 0.4)' }]}>
@@ -589,39 +625,118 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Crop size={14} color="#f59e0b" />
                   <Text style={[styles.studioTitle, { color: '#f59e0b' }]}>
-                    {isUrdu ? 'گاڑی اور خلاف ورزی پر کراپ فوکس' : 'Crop & Focus on Violating Vehicle'}
+                    {isUrdu ? 'ٹچ سے کراپ ایڈجسٹ کریں' : 'Touch & Drag to Crop'}
                   </Text>
                 </View>
-                <Text style={styles.studioHelp}>
-                  {isUrdu ? 'ایک ٹیپ سے زوم منتخب کریں' : 'Live optical zoom'}
-                </Text>
+                <View style={styles.cropActiveBadge}>
+                  <Text style={styles.cropActiveBadgeText}>{cropZoom.toFixed(1)}x Zoom</Text>
+                </View>
               </View>
 
-              {/* Crop Preset Selector Grid */}
-              <View style={styles.cropGrid}>
-                {CROP_PRESETS.map((p) => {
-                  const isSelected = cropPreset.id === p.id;
-                  return (
-                    <TouchableOpacity
-                      key={p.id}
-                      style={[
-                        styles.cropPresetCard,
-                        isSelected && styles.cropPresetCardActive,
-                      ]}
-                      onPress={() => handleSelectCrop(p)}
-                    >
-                      <View style={styles.cropPresetHeader}>
-                        <Text style={[styles.cropPresetTitle, isSelected && { color: '#f59e0b' }]}>
-                          {isUrdu ? p.labelUrdu : p.label}
+              {/* Touch Drag Zoom Slider Track */}
+              <View
+                style={styles.cropSliderContainer}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  if (w > 0) {
+                    setCropSliderWidth(w);
+                    cropSliderWidthRef.current = w;
+                  }
+                }}
+                {...cropSliderPanResponder.panHandlers}
+              >
+                <View style={styles.cropSliderTrack}>
+                  <View
+                    style={[
+                      styles.cropSliderTrackFill,
+                      { width: `${((cropZoom - 1.0) / 2.0) * 100}%` },
+                    ]}
+                  />
+                </View>
+                {/* Touch Knob */}
+                <View
+                  style={[
+                    styles.cropSliderKnob,
+                    { left: `${Math.max(0, Math.min(92, ((cropZoom - 1.0) / 2.0) * 100))}%` },
+                  ]}
+                >
+                  <View style={styles.cropKnobDot} />
+                </View>
+              </View>
+
+              {/* Touch Steppers & Mobile Quick Presets */}
+              <View style={styles.cropControlsRow}>
+                {/* Steppers */}
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    style={styles.stepBtn}
+                    onPress={() => setCropZoom((prev) => Math.max(1.0, Math.round((prev - 0.2) * 10) / 10))}
+                    disabled={cropZoom <= 1.0}
+                  >
+                    <Text style={[styles.stepBtnText, cropZoom <= 1.0 && { color: Colors.edge }]}>-0.2x</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.stepBtn}
+                    onPress={() => setCropZoom((prev) => Math.min(3.0, Math.round((prev + 0.2) * 10) / 10))}
+                    disabled={cropZoom >= 3.0}
+                  >
+                    <Text style={[styles.stepBtnText, cropZoom >= 3.0 && { color: Colors.edge }]}>+0.2x</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Mobile Quick Tap Chips */}
+                <View style={styles.cropChipsRow}>
+                  {[
+                    { label: '1.0x Full', zoom: 1.0 },
+                    { label: '1.4x Lane', zoom: 1.4 },
+                    { label: '1.8x Vehicle', zoom: 1.8 },
+                    { label: '2.5x Plate', zoom: 2.5 },
+                  ].map((chip) => {
+                    const isSelected = Math.abs(cropZoom - chip.zoom) < 0.1;
+                    return (
+                      <TouchableOpacity
+                        key={chip.label}
+                        style={[
+                          styles.cropChipBtn,
+                          isSelected && styles.cropChipBtnActive,
+                        ]}
+                        onPress={() => setCropZoom(chip.zoom)}
+                      >
+                        <Text
+                          style={[
+                            styles.cropChipText,
+                            isSelected && { color: '#000', fontWeight: '800' },
+                          ]}
+                        >
+                          {chip.label}
                         </Text>
-                        {isSelected && <Check size={12} color="#f59e0b" />}
-                      </View>
-                      <Text style={styles.cropPresetDesc}>
-                        {isUrdu ? p.descUrdu : p.desc}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Studio Actions */}
+              <View style={styles.studioActionsRow}>
+                <TouchableOpacity
+                  style={[styles.studioSecondaryBtn, { borderColor: 'rgba(245, 158, 11, 0.4)' }]}
+                  onPress={() => setActiveTool('none')}
+                >
+                  <Check size={13} color="#f59e0b" />
+                  <Text style={[styles.studioSecondaryText, { color: '#f59e0b' }]}>
+                    {isUrdu ? 'مکمل (Done)' : 'Done Cropping'}
+                  </Text>
+                </TouchableOpacity>
+
+                {cropZoom > 1.05 && (
+                  <TouchableOpacity
+                    style={styles.studioResetBtn}
+                    onPress={() => setCropZoom(1.0)}
+                  >
+                    <RotateCcw size={13} color={Colors.textMuted} />
+                    <Text style={styles.studioResetText}>{isUrdu ? 'اصل سائز' : 'Reset 1.0x'}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           )}
@@ -783,30 +898,92 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  cropReticleOverlay: {
+  // Touch Crop Frame Overlay
+  touchCropOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  cropTargetBox: {
-    width: 140,
-    height: 140,
-    borderRadius: 12,
+  cropInteractiveFrame: {
     borderWidth: 1.5,
-    borderColor: 'rgba(6, 182, 212, 0.7)',
-    borderStyle: 'dashed',
-    alignItems: 'center',
+    borderColor: '#f59e0b',
+    borderRadius: 8,
+    position: 'relative',
     justifyContent: 'center',
-    backgroundColor: 'rgba(6, 182, 212, 0.05)',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.05)',
   },
-  cropZoomPill: {
+  gridLineH1: {
     position: 'absolute',
-    top: 12,
-    left: 12,
+    left: 0,
+    right: 0,
+    top: '33.3%',
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  gridLineH2: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: '66.6%',
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  gridLineV1: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '33.3%',
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  gridLineV2: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '66.6%',
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  cornerBracket: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderColor: '#f59e0b',
+  },
+  cornerTL: {
+    top: -2,
+    left: -2,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopLeftRadius: 6,
+  },
+  cornerTR: {
+    top: -2,
+    right: -2,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopRightRadius: 6,
+  },
+  cornerBL: {
+    bottom: -2,
+    left: -2,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomLeftRadius: 6,
+  },
+  cornerBR: {
+    bottom: -2,
+    right: -2,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomRightRadius: 6,
+  },
+  cropCenterPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -815,52 +992,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-  cropZoomPillText: {
+  cropCenterPillText: {
     color: '#000',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  imageFooter: {
-    position: 'absolute',
-    bottom: 12,
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  blurBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(9, 13, 22, 0.88)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(6, 182, 212, 0.4)',
-  },
-  blurBadgeText: {
-    color: Colors.telemetry,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  timeTag: {
-    backgroundColor: 'rgba(9, 13, 22, 0.88)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  timeTagTrimmed: {
-    backgroundColor: '#06b6d4',
-  },
-  timeText: {
-    color: Colors.textMuted,
     fontSize: 11,
-    fontFamily: 'monospace',
-    fontWeight: '700',
+    fontWeight: '800',
   },
 
   // Edit Action Tab Bar
@@ -1149,35 +1284,86 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Crop Studio Presets Grid
-  cropGrid: {
-    gap: 8,
+  // Touch Crop Studio Slider & Controls
+  cropActiveBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
-  cropPresetCard: {
-    backgroundColor: Colors.canvas,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: Colors.edge,
-    padding: 10,
+  cropActiveBadgeText: {
+    color: '#f59e0b',
+    fontSize: 11,
+    fontWeight: '800',
   },
-  cropPresetCardActive: {
-    borderColor: '#f59e0b',
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+  cropSliderContainer: {
+    height: 44,
+    justifyContent: 'center',
+    marginBottom: 14,
+    position: 'relative',
   },
-  cropPresetHeader: {
+  cropSliderTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.edge,
+    overflow: 'hidden',
+  },
+  cropSliderTrackFill: {
+    height: '100%',
+    backgroundColor: '#f59e0b',
+    borderRadius: 3,
+  },
+  cropSliderKnob: {
+    position: 'absolute',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  cropKnobDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#f59e0b',
+  },
+  cropControlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 2,
+    marginBottom: 14,
+    gap: 8,
   },
-  cropPresetTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: Colors.ink,
+  cropChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    flex: 1,
+    justifyContent: 'flex-end',
   },
-  cropPresetDesc: {
-    fontSize: 11,
+  cropChipBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: Colors.edge,
+  },
+  cropChipBtnActive: {
+    backgroundColor: '#f59e0b',
+    borderColor: '#f59e0b',
+  },
+  cropChipText: {
     color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
   },
 
   // Main Submit & Remake Actions
