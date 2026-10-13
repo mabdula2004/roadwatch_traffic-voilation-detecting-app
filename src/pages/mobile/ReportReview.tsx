@@ -1,6 +1,6 @@
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,26 +10,38 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Dimensions,
+  PanResponder,
 } from 'react-native';
 import {
   ChevronLeft,
   EyeOff,
-  Fingerprint,
   Lock,
-  Download,
   RotateCcw,
   Scissors,
+  Crop,
   Play,
   Check,
   Clock,
   Sparkles,
+  WifiOff,
+  Maximize2,
+  Crosshair,
 } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import { uploadReport, type CapturedClip } from '../../lib/report';
+import {
+  uploadReport,
+  saveLocalReport,
+  saveFramesToDisk,
+  type CapturedClip,
+  type StoredCaseReport,
+} from '../../lib/report';
 import { analyzeTrafficViolation, type AiEvidentiaryResult } from '../../lib/aiAnalysis';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface ReportReviewProps {
   clip: CapturedClip;
@@ -43,39 +55,68 @@ function formatTime(sec: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+type CropPreset = {
+  id: string;
+  label: string;
+  labelUrdu: string;
+  zoom: number;
+  desc: string;
+  descUrdu: string;
+};
+
+const CROP_PRESETS: CropPreset[] = [
+  { id: '1.0', label: '1.0x Full', labelUrdu: '1.0x مکمل سڑک', zoom: 1.0, desc: 'Original wide road view', descUrdu: 'اصل چوڑا منظر' },
+  { id: '1.3', label: '1.3x Lane', labelUrdu: '1.3x لین فوکس', zoom: 1.3, desc: 'Crops side distractions', descUrdu: 'ٹریفک لین پر فوکس' },
+  { id: '1.6', label: '1.6x Vehicle', labelUrdu: '1.6x گاڑی باکس', zoom: 1.6, desc: 'Isolates target vehicle', descUrdu: 'گاڑی پر قریبی کراپ' },
+  { id: '2.0', label: '2.0x Plate', labelUrdu: '2.0x پلیٹ زوم', zoom: 2.0, desc: 'Forensic close-up focus', descUrdu: 'نمبر پلیٹ پر گہرا زوم' },
+];
+
 export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const { colors } = useTheme();
   const { t, isUrdu } = useLanguage();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [fileSizeBytes, setFileSizeBytes] = useState<number>(0);
 
   // Video Trimming & Editing State
   const totalDurationSec = Math.max(5, Math.round(clip.durationMs / 1000));
   const [trimStartSec, setTrimStartSec] = useState<number>(0);
   const [trimEndSec, setTrimEndSec] = useState<number>(totalDurationSec);
-  const [isEditingTrim, setIsEditingTrim] = useState<boolean>(false);
+  const [activeTool, setActiveTool] = useState<'none' | 'trim' | 'crop'>('none');
   const [isTrimApplied, setIsTrimApplied] = useState<boolean>(false);
   const [filmstrip, setFilmstrip] = useState<string[]>([]);
+  const [timelineWidth, setTimelineWidth] = useState<number>(SCREEN_WIDTH - 64);
+
+  // Video Crop & Framing State
+  const [cropPreset, setCropPreset] = useState<CropPreset>(CROP_PRESETS[0]);
+
+  // Touch Drag Refs for Smooth PanResponder Interaction
+  const trimStartSecRef = useRef<number>(0);
+  const trimEndSecRef = useRef<number>(totalDurationSec);
+  const timelineWidthRef = useRef<number>(SCREEN_WIDTH - 64);
+  const dragStartSecRef = useRef<number>(0);
+  const dragEndSecRef = useRef<number>(totalDurationSec);
 
   const player = useVideoPlayer(clip.uri);
 
+  // Keep refs synchronized with state
   useEffect(() => {
-    FileSystem.getInfoAsync(clip.uri)
-      .then((info) => {
-        if (info.exists && 'size' in info && typeof info.size === 'number') {
-          setFileSizeBytes(info.size);
-        }
-      })
-      .catch(() => {});
-  }, [clip.uri]);
+    trimStartSecRef.current = trimStartSec;
+  }, [trimStartSec]);
 
-  // Extract lightweight filmstrip thumbnails for interactive trimming
+  useEffect(() => {
+    trimEndSecRef.current = trimEndSec;
+  }, [trimEndSec]);
+
+  useEffect(() => {
+    timelineWidthRef.current = timelineWidth;
+  }, [timelineWidth]);
+
+  // Extract filmstrip thumbnails for interactive visual trimming
   useEffect(() => {
     let alive = true;
     async function loadFilmstrip() {
       const dur = Math.max(5000, clip.durationMs);
-      const points = [0.1, 0.3, 0.55, 0.75, 0.95];
+      const points = [0.08, 0.28, 0.5, 0.72, 0.94];
       const thumbs: string[] = [];
       for (const p of points) {
         try {
@@ -96,7 +137,57 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
     };
   }, [clip.uri, clip.durationMs]);
 
-  // Trim Adjusters (Guarantees legal minimum 5 seconds evidence constraint)
+  // Left Handle PanResponder (Touch-drag start time)
+  const leftPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragStartSecRef.current = trimStartSecRef.current;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const width = timelineWidthRef.current;
+        if (width <= 0) return;
+        const deltaSec = (gestureState.dx / width) * totalDurationSec;
+        const maxAllowed = trimEndSecRef.current - 5; // Enforce legal minimum 5 seconds
+        const newStart = Math.max(0, Math.min(maxAllowed, dragStartSecRef.current + deltaSec));
+        const rounded = Math.round(newStart * 10) / 10;
+        setTrimStartSec(rounded);
+        setIsTrimApplied(true);
+        try {
+          player.currentTime = rounded;
+        } catch {}
+      },
+      onPanResponderRelease: () => {},
+    })
+  ).current;
+
+  // Right Handle PanResponder (Touch-drag end time)
+  const rightPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragEndSecRef.current = trimEndSecRef.current;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const width = timelineWidthRef.current;
+        if (width <= 0) return;
+        const deltaSec = (gestureState.dx / width) * totalDurationSec;
+        const minAllowed = trimStartSecRef.current + 5; // Enforce legal minimum 5 seconds
+        const newEnd = Math.min(totalDurationSec, Math.max(minAllowed, dragEndSecRef.current + deltaSec));
+        const rounded = Math.round(newEnd * 10) / 10;
+        setTrimEndSec(rounded);
+        setIsTrimApplied(true);
+        try {
+          player.currentTime = rounded;
+        } catch {}
+      },
+      onPanResponderRelease: () => {},
+    })
+  ).current;
+
+  // Fine-tune Steppers
   function adjustStart(delta: number) {
     const nextStart = Math.max(0, Math.min(trimStartSec + delta, trimEndSec - 5));
     setTrimStartSec(nextStart);
@@ -131,6 +222,10 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
     } catch {}
   }
 
+  function handleSelectCrop(preset: CropPreset) {
+    setCropPreset(preset);
+  }
+
   function handleRemakeVideo() {
     Alert.alert(
       isUrdu ? 'دوبارہ ویڈیو ریکارڈ کریں؟' : 'Remake Evidence Video?',
@@ -161,31 +256,83 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         durationMs: effectiveDurationMs,
         trimStartMs: isTrimApplied ? Math.round(trimStartSec * 1000) : 0,
         trimEndMs: isTrimApplied ? Math.round(trimEndSec * 1000) : clip.durationMs,
+        cropZoom: cropPreset.zoom > 1.0 ? cropPreset.zoom : undefined,
+        cropLabel: cropPreset.zoom > 1.0 ? cropPreset.label : undefined,
       };
 
-      // Analyze evidence with Qwen 2.5-VL upon submission within the trimmed window
-      const result = await analyzeTrafficViolation({
-        videoUri: trimmedClip.uri,
-        durationMs: trimmedClip.durationMs,
-        trimStartMs: trimmedClip.trimStartMs,
-        trimEndMs: trimmedClip.trimEndMs,
-        claimedClass: 'auto_ai_detect',
-        capturedAt: trimmedClip.capturedAt,
-        latitude: trimmedClip.latitude,
-        longitude: trimmedClip.longitude,
-        locationName: trimmedClip.locationName,
-      });
+      // 1. Attempt AI analysis with automatic offline resilience fallback
+      let result: AiEvidentiaryResult;
+      let isOffline = false;
 
+      try {
+        result = await analyzeTrafficViolation({
+          videoUri: trimmedClip.uri,
+          durationMs: trimmedClip.durationMs,
+          trimStartMs: trimmedClip.trimStartMs,
+          trimEndMs: trimmedClip.trimEndMs,
+          cropZoom: trimmedClip.cropZoom,
+          cropLabel: trimmedClip.cropLabel,
+          claimedClass: 'auto_ai_detect',
+          capturedAt: trimmedClip.capturedAt,
+          latitude: trimmedClip.latitude,
+          longitude: trimmedClip.longitude,
+          locationName: trimmedClip.locationName,
+        });
+      } catch (analysisErr) {
+        console.log('AI verification network offline notice:', analysisErr);
+        isOffline = true;
+        result = {
+          caseId: `LOCAL-${Date.now().toString().slice(-6)}`,
+          violationDetected: false,
+          violationType: null,
+          violationName: 'Offline Evidence (Pending Sync)',
+          vehicleDistance: 'optimal',
+          plateStatus: 'clear',
+          plateNumber: null,
+          plateConfidence: 0,
+          clarityScore: 100,
+          rejectionReason: 'none',
+          vehicleMakeModel: 'Pending Sync',
+          vehicleColor: 'Unknown',
+          vehicleType: 'Unknown',
+          fineAmountPkr: 0,
+          status: 'no_violation',
+          statusLabel: 'Saved to Local Vault (Auto-Sync Queue)',
+          reasoning: 'Evidence video preserved offline on device disk. AI violation verification will automatically execute once internet connectivity is restored.',
+          notes: 'Evidence video cached locally on device storage.',
+          analyzedAt: new Date().toISOString(),
+          locationName: trimmedClip.locationName,
+        };
+      }
+
+      // 2. Persist evidence report (always saved to local vault first)
       const id = await uploadReport(trimmedClip, 'auto_ai_detect', result);
-      onSubmit(id, result);
+
+      if (isOffline) {
+        Alert.alert(
+          isUrdu ? 'مقامی والٹ میں محفوظ!' : 'Saved to Local Vault!',
+          isUrdu
+            ? 'انٹرنیٹ میسر نہ ہونے کی وجہ سے ویڈیو آپ کے نجی والٹ میں محفوظ کر دی گئی ہے۔ جیسے ہی انٹرنیٹ آئے گا یہ خودکار تجزیہ کے لیے سنک ہو جائے گی۔'
+            : 'No active internet connection. Video evidence has been securely preserved in your Private Offline Vault and will automatically sync once online.',
+          [{ text: 'OK', onPress: () => onSubmit(id, result) }]
+        );
+      } else {
+        onSubmit(id, result);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Upload failed. Keep this clip and retry.');
+      setError(cause instanceof Error ? cause.message : 'Save failed. Please retry.');
     } finally {
       setSubmitting(false);
     }
   }
 
-  const effectiveDurationSec = isTrimApplied ? trimEndSec - trimStartSec : totalDurationSec;
+  const effectiveDurationSec = isTrimApplied
+    ? Math.round((trimEndSec - trimStartSec) * 10) / 10
+    : totalDurationSec;
+
+  const leftPercent = Math.max(0, Math.min(100, (trimStartSec / totalDurationSec) * 100));
+  const rightPercent = Math.max(0, Math.min(100, (trimEndSec / totalDurationSec) * 100));
+  const windowWidthPercent = Math.max(0, rightPercent - leftPercent);
 
   return (
     <View style={styles.container}>
@@ -199,7 +346,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         <View style={styles.headerRightActions}>
           <TouchableOpacity style={styles.remakeHeaderBtn} onPress={handleRemakeVideo}>
             <RotateCcw size={12} color="#ef4444" />
-            <Text style={styles.remakeHeaderText}>{isUrdu ? 'دوبارہ ریکارڈ' : 'Remake'}</Text>
+            <Text style={styles.remakeHeaderText}>{isUrdu ? 'دوبارہ ریکارڈ' : 'Remake Video'}</Text>
           </TouchableOpacity>
           <View style={styles.draftBadge}>
             <Text style={styles.draftText}>{isUrdu ? 'ڈرافٹ' : 'DRAFT'}</Text>
@@ -208,103 +355,182 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <View style={{ flex: 1, marginRight: 10 }}>
-            <Text style={styles.title}>{isUrdu ? 'شواہد کا جائزہ لیں' : 'Review Evidence'}</Text>
-            <Text style={styles.subtitle}>
-              {isUrdu
-                ? 'نجی والٹ میں جمع کرنے سے پہلے ویڈیو چیک یا ٹرم کریں۔'
-                : 'Review, trim violation window, or remake video before submission.'}
-            </Text>
-          </View>
+        <View style={styles.titleSection}>
+          <Text style={styles.title}>{isUrdu ? 'شواہد کا جائزہ اور ایڈیٹنگ' : 'Review & Edit Evidence'}</Text>
+          <Text style={styles.subtitle}>
+            {isUrdu
+              ? 'ویڈیو ٹرم کریں، گاڑی پر کراپ فوکس کریں یا والٹ میں جمع کرائیں۔'
+              : 'Touch-slide to trim violation window, crop focus, or submit to vault.'}
+          </Text>
         </View>
 
-        {/* Evidence Video Card */}
+        {/* Video Card with Live Crop/Zoom Effect */}
         <View style={styles.mediaCard}>
           <View style={styles.imageWrapper}>
-            <VideoView player={player} style={styles.evidenceImage} nativeControls contentFit="cover" />
+            <View style={[styles.videoCropContainer, { transform: [{ scale: cropPreset.zoom }] }]}>
+              <VideoView player={player} style={styles.evidenceImage} nativeControls contentFit="cover" />
+            </View>
 
+            {/* Overlaid Crop Reticle when Zoomed */}
+            {cropPreset.zoom > 1.0 && (
+              <View style={styles.cropReticleOverlay} pointerEvents="none">
+                <View style={styles.cropTargetBox}>
+                  <Crosshair size={28} color="rgba(6, 182, 212, 0.6)" />
+                </View>
+                <View style={styles.cropZoomPill}>
+                  <Crop size={11} color="#000" />
+                  <Text style={styles.cropZoomPillText}>{cropPreset.label.toUpperCase()}</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Floating Badges */}
             <View style={styles.imageFooter}>
               <View style={styles.blurBadge}>
                 <EyeOff size={12} color={Colors.telemetry} />
-                <Text style={styles.blurBadgeText}>{isUrdu ? 'چہرہ خودکار دھندلا فعال' : 'FACIAL AUTO-BLUR ACTIVE'}</Text>
+                <Text style={styles.blurBadgeText}>{isUrdu ? 'چہرہ خودکار دھندلا' : 'FACIAL AUTO-BLUR ACTIVE'}</Text>
               </View>
-              <View style={[styles.timeTag, isTrimApplied && { borderColor: Colors.telemetry, borderWidth: 1 }]}>
-                <Text style={[styles.timeText, isTrimApplied && { color: Colors.telemetry, fontWeight: '700' }]}>
-                  {effectiveDurationSec}s {isTrimApplied ? '(TRIMMED)' : ''}
+              <View style={[styles.timeTag, isTrimApplied && styles.timeTagTrimmed]}>
+                <Text style={[styles.timeText, isTrimApplied && { color: '#000', fontWeight: '800' }]}>
+                  {effectiveDurationSec}s {isTrimApplied ? '⚡ TRIMMED' : ''}
                 </Text>
               </View>
             </View>
           </View>
 
-          {/* Quick Edit Bar */}
-          <View style={styles.editActionBar}>
+          {/* High-Contrast Interactive Edit Action Bar */}
+          <View style={styles.editTabBar}>
+            {/* Trim Tool Tab */}
             <TouchableOpacity
               style={[
-                styles.editToggleBtn,
-                isEditingTrim
-                  ? { backgroundColor: Colors.telemetry, borderColor: Colors.telemetry }
-                  : { backgroundColor: 'rgba(6, 182, 212, 0.1)', borderColor: 'rgba(6, 182, 212, 0.3)' },
+                styles.toolTabBtn,
+                activeTool === 'trim' && styles.toolTabBtnActive,
               ]}
-              onPress={() => setIsEditingTrim(!isEditingTrim)}
+              onPress={() => setActiveTool(activeTool === 'trim' ? 'none' : 'trim')}
             >
-              <Scissors size={14} color={isEditingTrim ? '#000' : Colors.telemetry} />
-              <Text style={[styles.editToggleBtnText, { color: isEditingTrim ? '#000' : Colors.telemetry }]}>
-                {isEditingTrim
-                  ? (isUrdu ? 'ایڈیٹنگ ٹول بند کریں' : 'Close Trim Tool')
-                  : (isUrdu ? 'ویڈیو ٹرم / کروپ کریں (Trim Clip)' : 'Trim Evidence Window (Edit Clip)')}
+              <Scissors size={15} color={activeTool === 'trim' ? '#000' : '#06b6d4'} />
+              <Text style={[styles.toolTabText, activeTool === 'trim' ? { color: '#000' } : { color: '#06b6d4' }]}>
+                {isUrdu ? 'ٹچ سے ٹرم کریں (Trim)' : 'Touch Trim Slider'}
               </Text>
+              {isTrimApplied && (
+                <View style={styles.appliedDot} />
+              )}
             </TouchableOpacity>
 
-            {isTrimApplied && (
-              <View style={styles.trimActiveBadge}>
-                <Check size={11} color="#10b981" />
-                <Text style={styles.trimActiveBadgeText}>
-                  {formatTime(trimStartSec)} - {formatTime(trimEndSec)}
-                </Text>
-              </View>
-            )}
+            {/* Crop Tool Tab */}
+            <TouchableOpacity
+              style={[
+                styles.toolTabBtn,
+                activeTool === 'crop' && styles.toolTabBtnActiveCrop,
+              ]}
+              onPress={() => setActiveTool(activeTool === 'crop' ? 'none' : 'crop')}
+            >
+              <Crop size={15} color={activeTool === 'crop' ? '#000' : '#f59e0b'} />
+              <Text style={[styles.toolTabText, activeTool === 'crop' ? { color: '#000' } : { color: '#f59e0b' }]}>
+                {isUrdu ? 'کراپ اور زوم (Crop)' : 'Crop Framing & Zoom'}
+              </Text>
+              {cropPreset.zoom > 1.0 && (
+                <View style={[styles.appliedDot, { backgroundColor: '#f59e0b' }]} />
+              )}
+            </TouchableOpacity>
           </View>
 
-          {/* Interactive Trimming Studio */}
-          {isEditingTrim && (
+          {/* =========================================================================
+              TOOL 1: TOUCH-BASED SLIDER VIDEO TRIMMING STUDIO
+              ========================================================================= */}
+          {activeTool === 'trim' && (
             <View style={styles.trimStudioCard}>
               <View style={styles.studioHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Sparkles size={14} color={Colors.telemetry} />
+                  <Scissors size={14} color="#06b6d4" />
                   <Text style={styles.studioTitle}>
-                    {isUrdu ? 'خلاف ورزی کا دورانیہ منتخب کریں' : 'Trim Violation Window'}
+                    {isUrdu ? 'انگلی سے سلائیڈ کر کے دورانیہ منتخب کریں' : 'Slide Handles with Finger to Trim'}
                   </Text>
                 </View>
                 <Text style={styles.studioHelp}>
-                  {isUrdu ? 'صرف اہم لمحہ رکھیں (کم از کم 5 سیکنڈ)' : 'Select key violation moment (Min. 5s)'}
+                  {isUrdu ? 'کم از کم 5 سیکنڈ لازمی' : 'Min. 5s Legal Proof'}
                 </Text>
               </View>
 
-              {/* Visual Filmstrip Thumbnails */}
-              {filmstrip.length > 0 && (
-                <View style={styles.filmstripContainer}>
-                  <View style={styles.filmstripRow}>
-                    {filmstrip.map((thumbUri, i) => (
+              {/* Touch Drag Filmstrip Track */}
+              <View
+                style={styles.touchTimelineWrapper}
+                onLayout={(e) => setTimelineWidth(e.nativeEvent.layout.width)}
+              >
+                {/* Visual Thumbnails Strip */}
+                <View style={styles.filmstripRow}>
+                  {filmstrip.length > 0 ? (
+                    filmstrip.map((thumbUri, i) => (
                       <Image key={i} source={{ uri: thumbUri }} style={styles.filmstripThumb} resizeMode="cover" />
-                    ))}
+                    ))
+                  ) : (
+                    <View style={styles.filmstripPlaceholder}>
+                      <ActivityIndicator size="small" color="#06b6d4" />
+                    </View>
+                  )}
+                </View>
+
+                {/* Shaded Mask: Left Excluded Segment */}
+                <View
+                  style={[styles.excludedMaskLeft, { width: `${leftPercent}%` }]}
+                  pointerEvents="none"
+                />
+
+                {/* Shaded Mask: Right Excluded Segment */}
+                <View
+                  style={[styles.excludedMaskRight, { width: `${100 - rightPercent}%` }]}
+                  pointerEvents="none"
+                />
+
+                {/* Active Highlighted Trim Window (Illuminated Border) */}
+                <View
+                  style={[
+                    styles.activeTrimWindow,
+                    { left: `${leftPercent}%`, width: `${windowWidthPercent}%` },
+                  ]}
+                  pointerEvents="none"
+                />
+
+                {/* TOUCH DRAG HANDLE: LEFT (START TRIM) */}
+                <View
+                  style={[styles.dragHandle, styles.dragHandleLeft, { left: `${leftPercent}%` }]}
+                  {...leftPanResponder.panHandlers}
+                >
+                  <View style={styles.handleBadge}>
+                    <Text style={styles.handleBadgeText}>{formatTime(trimStartSec)}</Text>
                   </View>
-                  <View style={styles.filmstripOverlay}>
-                    {/* Dimmed Left */}
-                    <View style={{ width: `${Math.max(0, (trimStartSec / totalDurationSec) * 100)}%`, backgroundColor: 'rgba(0, 0, 0, 0.7)' }} />
-                    {/* Active Highlighted Trim Window */}
-                    <View style={{ flex: 1, borderWidth: 2, borderColor: Colors.telemetry, borderRadius: 4, backgroundColor: 'rgba(6, 182, 212, 0.15)' }} />
-                    {/* Dimmed Right */}
-                    <View style={{ width: `${Math.max(0, ((totalDurationSec - trimEndSec) / totalDurationSec) * 100)}%`, backgroundColor: 'rgba(0, 0, 0, 0.7)' }} />
+                  <View style={styles.handleBarGrip}>
+                    <View style={styles.gripStripe} />
+                    <View style={styles.gripStripe} />
                   </View>
                 </View>
-              )}
 
-              {/* Interactive Start & End Steppers */}
+                {/* TOUCH DRAG HANDLE: RIGHT (END TRIM) */}
+                <View
+                  style={[styles.dragHandle, styles.dragHandleRight, { left: `${rightPercent}%` }]}
+                  {...rightPanResponder.panHandlers}
+                >
+                  <View style={[styles.handleBadge, styles.handleBadgeRight]}>
+                    <Text style={styles.handleBadgeText}>{formatTime(trimEndSec)}</Text>
+                  </View>
+                  <View style={styles.handleBarGrip}>
+                    <View style={styles.gripStripe} />
+                    <View style={styles.gripStripe} />
+                  </View>
+                </View>
+              </View>
+
+              <Text style={styles.touchGuidanceText}>
+                {isUrdu
+                  ? '👈 انگلی سے دونوں سروں کو دائیں بائیں کھینچیں (Slide) 👉'
+                  : '👈 Touch & slide the cyan handles left or right to trim 👉'}
+              </Text>
+
+              {/* Fine-Tuning Precision Steppers */}
               <View style={styles.trimControlsRow}>
-                {/* Start Controller */}
+                {/* Start Steppers */}
                 <View style={styles.trimBox}>
-                  <Text style={styles.trimBoxLabel}>START TRIM</Text>
+                  <Text style={styles.trimBoxLabel}>START</Text>
                   <Text style={styles.trimBoxValue}>{formatTime(trimStartSec)}</Text>
                   <View style={styles.stepperRow}>
                     <TouchableOpacity
@@ -324,20 +550,18 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
                   </View>
                 </View>
 
-                {/* Duration Summary */}
+                {/* Legal Duration Badge */}
                 <View style={styles.trimDurationBox}>
-                  <Clock size={16} color={Colors.telemetry} />
-                  <Text style={styles.trimDurationNumber}>
-                    {effectiveDurationSec}s
-                  </Text>
+                  <Clock size={16} color="#06b6d4" />
+                  <Text style={styles.trimDurationNumber}>{effectiveDurationSec}s</Text>
                   <Text style={[styles.trimDurationSub, { color: effectiveDurationSec >= 5 ? '#10b981' : '#ef4444' }]}>
                     {effectiveDurationSec >= 5 ? '✓ Legal Valid' : 'Min 5s required'}
                   </Text>
                 </View>
 
-                {/* End Controller */}
+                {/* End Steppers */}
                 <View style={styles.trimBox}>
-                  <Text style={styles.trimBoxLabel}>END TRIM</Text>
+                  <Text style={styles.trimBoxLabel}>END</Text>
                   <Text style={styles.trimBoxValue}>{formatTime(trimEndSec)}</Text>
                   <View style={styles.stepperRow}>
                     <TouchableOpacity
@@ -361,37 +585,67 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
               {/* Studio Actions */}
               <View style={styles.studioActionsRow}>
                 <TouchableOpacity style={styles.studioSecondaryBtn} onPress={handlePreviewTrim}>
-                  <Play size={13} color={Colors.ink} fill={Colors.ink} />
+                  <Play size={13} color="#fff" fill="#fff" />
                   <Text style={styles.studioSecondaryText}>
-                    {isUrdu ? 'پیش نظارہ چلائیں' : 'Preview Trim'}
+                    {isUrdu ? 'ٹرم پیش نظارہ' : 'Play Trimmed Window'}
                   </Text>
                 </TouchableOpacity>
 
                 {isTrimApplied && (
                   <TouchableOpacity style={styles.studioResetBtn} onPress={handleResetTrim}>
                     <RotateCcw size={13} color={Colors.textMuted} />
-                    <Text style={styles.studioResetText}>{isUrdu ? 'ری سیٹ' : 'Reset'}</Text>
+                    <Text style={styles.studioResetText}>{isUrdu ? 'ری سیٹ' : 'Reset Full'}</Text>
                   </TouchableOpacity>
                 )}
               </View>
             </View>
           )}
 
-          <View style={styles.mediaMeta}>
-            <View style={styles.metaLeft}>
-              <View style={styles.metaRow}>
-                <Fingerprint size={14} color={Colors.valid} />
-                <Text style={styles.metaLabel}>{isUrdu ? 'تصدیق شدہ فوٹیج' : 'VERIFIED EVIDENCE'}</Text>
+          {/* =========================================================================
+              TOOL 2: CROP & FRAMING ZOOM STUDIO
+              ========================================================================= */}
+          {activeTool === 'crop' && (
+            <View style={[styles.trimStudioCard, { borderColor: 'rgba(245, 158, 11, 0.4)' }]}>
+              <View style={styles.studioHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Crop size={14} color="#f59e0b" />
+                  <Text style={[styles.studioTitle, { color: '#f59e0b' }]}>
+                    {isUrdu ? 'گاڑی اور خلاف ورزی پر کراپ فوکس' : 'Crop & Focus on Violating Vehicle'}
+                  </Text>
+                </View>
+                <Text style={styles.studioHelp}>
+                  {isUrdu ? 'ایک ٹیپ سے زوم منتخب کریں' : 'Live optical zoom'}
+                </Text>
               </View>
-              <Text style={styles.hashText} numberOfLines={1}>
-                {new Date(clip.capturedAt).toLocaleString()} · {fileSizeBytes > 0 ? (fileSizeBytes / 1048576).toFixed(1) : '1.8'} MB
-              </Text>
+
+              {/* Crop Preset Selector Grid */}
+              <View style={styles.cropGrid}>
+                {CROP_PRESETS.map((p) => {
+                  const isSelected = cropPreset.id === p.id;
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={[
+                        styles.cropPresetCard,
+                        isSelected && styles.cropPresetCardActive,
+                      ]}
+                      onPress={() => handleSelectCrop(p)}
+                    >
+                      <View style={styles.cropPresetHeader}>
+                        <Text style={[styles.cropPresetTitle, isSelected && { color: '#f59e0b' }]}>
+                          {isUrdu ? p.labelUrdu : p.label}
+                        </Text>
+                        {isSelected && <Check size={12} color="#f59e0b" />}
+                      </View>
+                      <Text style={styles.cropPresetDesc}>
+                        {isUrdu ? p.descUrdu : p.desc}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
-            <View style={styles.exportTag}>
-              <Download size={12} color={Colors.textMuted} />
-              <Text style={styles.exportText}>{isUrdu ? 'مقامی محفوظ' : 'Local copy'}</Text>
-            </View>
-          </View>
+          )}
         </View>
 
         {/* Action 1: Submit to Private Vault */}
@@ -407,7 +661,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           )}
           <Text style={styles.submitText}>
             {submitting
-              ? (isUrdu ? 'تجزیہ اور والٹ میں جمع ہو رہا ہے…' : 'Analyzing & Submitting to Private Vault…')
+              ? (isUrdu ? 'تجزیہ اور والٹ میں محفوظ ہو رہا ہے…' : 'Analyzing & Submitting to Private Vault…')
               : (isUrdu ? 'نجی والٹ میں جمع کرائیں' : 'Submit to Private Vault')}
           </Text>
         </TouchableOpacity>
@@ -416,14 +670,14 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         <TouchableOpacity style={styles.remakeFullBtn} onPress={handleRemakeVideo} disabled={submitting}>
           <RotateCcw size={16} color={colors.ink} />
           <Text style={[styles.remakeFullBtnText, { color: colors.ink }]}>
-            {isUrdu ? 'ویڈیو مسترد کریں اور دوبارہ ریکارڈ کریں' : 'Discard & Remake Video'}
+            {isUrdu ? 'ویڈیو مسترد کریں اور نئی ویڈیو بنائیں' : 'Discard & Remake Video'}
           </Text>
         </TouchableOpacity>
 
         <Text style={styles.footerNote}>
           {isUrdu
-            ? 'آپ کی رپورٹ کا AI سے تجزیہ کیا جاتا ہے اور تصدیق شدہ شواہد شہری والٹ میں محفوظ کیے جاتے ہیں۔'
-            : 'Evidence video is analyzed by Qwen Vision AI and certified proofs are permanently sealed into your private vault.'}
+            ? 'انٹرنیٹ نہ ہونے کی صورت میں ویڈیو خودکار طور پر آپ کے آف لائن والٹ میں محفوظ رہے گی۔'
+            : 'If offline, evidence is safely cached in your Local Vault and automatically syncs once connected.'}
         </Text>
         {!!error && <Text accessibilityRole="alert" style={{ color: colors.signal, marginTop: 8, textAlign: 'center' }}>{error}</Text>}
       </ScrollView>
@@ -467,11 +721,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 6,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   remakeHeaderText: {
     color: '#ef4444',
@@ -481,7 +735,7 @@ const styles = StyleSheet.create({
   draftBadge: {
     backgroundColor: 'rgba(245, 158, 11, 0.15)',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 6,
   },
   draftText: {
@@ -492,6 +746,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
+  },
+  titleSection: {
+    marginBottom: 14,
   },
   title: {
     fontSize: 22,
@@ -504,7 +761,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.textMuted,
     lineHeight: 18,
-    marginBottom: 16,
   },
   mediaCard: {
     backgroundColor: Colors.surface,
@@ -516,13 +772,56 @@ const styles = StyleSheet.create({
   },
   imageWrapper: {
     width: '100%',
-    height: 280,
-    backgroundColor: '#0a0d14',
+    height: 290,
+    backgroundColor: '#000',
     position: 'relative',
+    overflow: 'hidden',
+  },
+  videoCropContainer: {
+    width: '100%',
+    height: '100%',
   },
   evidenceImage: {
     width: '100%',
     height: '100%',
+  },
+  cropReticleOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cropTargetBox: {
+    width: 140,
+    height: 140,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(6, 182, 212, 0.7)',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(6, 182, 212, 0.05)',
+  },
+  cropZoomPill: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  cropZoomPillText: {
+    color: '#000',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   imageFooter: {
     position: 'absolute',
@@ -537,12 +836,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(9, 13, 22, 0.85)',
+    backgroundColor: 'rgba(9, 13, 22, 0.88)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(6, 182, 212, 0.3)',
+    borderColor: 'rgba(6, 182, 212, 0.4)',
   },
   blurBadgeText: {
     color: Colors.telemetry,
@@ -551,63 +850,70 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   timeTag: {
-    backgroundColor: 'rgba(9, 13, 22, 0.85)',
+    backgroundColor: 'rgba(9, 13, 22, 0.88)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
+  },
+  timeTagTrimmed: {
+    backgroundColor: '#06b6d4',
   },
   timeText: {
     color: Colors.textMuted,
     fontSize: 11,
     fontFamily: 'monospace',
+    fontWeight: '700',
   },
 
-  // Edit Action Bar
-  editActionBar: {
+  // Edit Action Tab Bar
+  editTabBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    padding: 8,
+    gap: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
     borderTopWidth: 1,
     borderTopColor: Colors.edge,
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
   },
-  editToggleBtn: {
+  toolTabBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(6, 182, 212, 0.4)',
+    position: 'relative',
   },
-  editToggleBtnText: {
+  toolTabBtnActive: {
+    backgroundColor: '#06b6d4',
+    borderColor: '#06b6d4',
+  },
+  toolTabBtnActiveCrop: {
+    backgroundColor: '#f59e0b',
+    borderColor: '#f59e0b',
+  },
+  toolTabText: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  trimActiveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  trimActiveBadgeText: {
-    color: '#10b981',
-    fontSize: 11,
-    fontWeight: '700',
-    fontFamily: 'monospace',
+  appliedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#06b6d4',
+    position: 'absolute',
+    top: 6,
+    right: 8,
   },
 
-  // Trimming Studio Card
+  // Trimming Studio Panel
   trimStudioCard: {
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    padding: 12,
+    backgroundColor: '#090d16',
+    padding: 14,
     borderTopWidth: 1,
     borderTopColor: Colors.edge,
     gap: 12,
@@ -624,42 +930,133 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   studioHelp: {
-    color: Colors.textMuted,
-    fontSize: 10,
+    color: '#06b6d4',
+    fontSize: 11,
+    fontWeight: '700',
   },
 
-  // Filmstrip
-  filmstripContainer: {
-    height: 52,
-    borderRadius: 8,
-    overflow: 'hidden',
+  // Touch Drag Filmstrip Track
+  touchTimelineWrapper: {
+    height: 68,
+    borderRadius: 10,
     position: 'relative',
     backgroundColor: '#000',
+    overflow: 'visible',
+    marginTop: 14,
+    marginBottom: 4,
   },
   filmstripRow: {
     flexDirection: 'row',
     width: '100%',
     height: '100%',
+    borderRadius: 10,
+    overflow: 'hidden',
   },
   filmstripThumb: {
     flex: 1,
     height: '100%',
   },
-  filmstripOverlay: {
+  filmstripPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  excludedMaskLeft: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    borderTopLeftRadius: 10,
+    borderBottomLeftRadius: 10,
+  },
+  excludedMaskRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
+  },
+  activeTrimWindow: {
     position: 'absolute',
     top: 0,
-    left: 0,
-    right: 0,
     bottom: 0,
-    flexDirection: 'row',
+    borderTopWidth: 3,
+    borderBottomWidth: 3,
+    borderColor: '#06b6d4',
+    backgroundColor: 'rgba(6, 182, 212, 0.15)',
   },
 
-  // Trim Steppers Controls
+  // Drag Handles
+  dragHandle: {
+    position: 'absolute',
+    top: -6,
+    bottom: -6,
+    width: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  dragHandleLeft: {
+    marginLeft: -16,
+  },
+  dragHandleRight: {
+    marginLeft: -16,
+  },
+  handleBadge: {
+    position: 'absolute',
+    top: -22,
+    backgroundColor: '#06b6d4',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  handleBadgeRight: {
+    backgroundColor: '#06b6d4',
+  },
+  handleBadgeText: {
+    color: '#000',
+    fontSize: 10,
+    fontWeight: '900',
+    fontFamily: 'monospace',
+  },
+  handleBarGrip: {
+    width: 24,
+    height: '100%',
+    borderRadius: 6,
+    backgroundColor: '#06b6d4',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    shadowColor: '#06b6d4',
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  gripStripe: {
+    width: 2,
+    height: 24,
+    backgroundColor: '#000',
+    borderRadius: 1,
+  },
+  touchGuidanceText: {
+    color: '#06b6d4',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+
+  // Steppers Controls
   trimControlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
+    marginTop: 4,
   },
   trimBox: {
     flex: 1,
@@ -691,7 +1088,7 @@ const styles = StyleSheet.create({
   stepBtn: {
     backgroundColor: Colors.surface,
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 5,
     borderWidth: 1,
     borderColor: Colors.edge,
@@ -706,17 +1103,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   trimDurationNumber: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 17,
+    fontWeight: '900',
     color: Colors.ink,
     marginTop: 2,
   },
   trimDurationSub: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 
-  // Studio Actions Row
+  // Studio Actions
   studioActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -728,23 +1125,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.edge,
+    backgroundColor: '#06b6d4',
   },
   studioSecondaryText: {
     fontSize: 12,
-    fontWeight: '700',
-    color: Colors.ink,
+    fontWeight: '800',
+    color: '#000',
   },
   studioResetBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: Colors.surface,
     borderWidth: 1,
@@ -752,45 +1147,42 @@ const styles = StyleSheet.create({
   },
   studioResetText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.textMuted,
   },
 
-  mediaMeta: {
+  // Crop Studio Presets Grid
+  cropGrid: {
+    gap: 8,
+  },
+  cropPresetCard: {
+    backgroundColor: Colors.canvas,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: Colors.edge,
+    padding: 10,
+  },
+  cropPresetCardActive: {
+    borderColor: '#f59e0b',
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+  },
+  cropPresetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
-    borderTopWidth: 1,
-    borderTopColor: Colors.edge,
+    marginBottom: 2,
   },
-  metaLeft: {
-    gap: 3,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  metaLabel: {
-    color: Colors.valid,
-    fontSize: 10,
+  cropPresetTitle: {
+    fontSize: 13,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    color: Colors.ink,
   },
-  hashText: {
-    color: Colors.textMuted,
+  cropPresetDesc: {
     fontSize: 11,
-  },
-  exportTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  exportText: {
     color: Colors.textMuted,
-    fontSize: 11,
   },
+
+  // Main Submit & Remake Actions
   submitButton: {
     backgroundColor: Colors.accent,
     borderRadius: 14,
@@ -804,7 +1196,7 @@ const styles = StyleSheet.create({
   submitText: {
     color: '#000',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   remakeFullBtn: {
     backgroundColor: Colors.surface,
@@ -829,4 +1221,3 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 });
-

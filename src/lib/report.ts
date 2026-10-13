@@ -15,6 +15,8 @@ export interface CapturedClip {
   durationMs: number;
   trimStartMs?: number;
   trimEndMs?: number;
+  cropZoom?: number;
+  cropLabel?: string;
   framesBase64?: string[];
 }
 

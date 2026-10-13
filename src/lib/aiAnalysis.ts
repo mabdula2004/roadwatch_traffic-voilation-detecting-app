@@ -143,6 +143,8 @@ export async function analyzeTrafficViolation(params: {
   durationMs?: number;
   trimStartMs?: number;
   trimEndMs?: number;
+  cropZoom?: number;
+  cropLabel?: string;
   framesBase64?: string[];
   claimedClass: string;
   capturedAt: string;
@@ -211,8 +213,12 @@ export async function analyzeTrafficViolation(params: {
     };
   }
 
+  const cropNote = params.cropZoom && params.cropZoom > 1
+    ? `\nNote: Framing zoom applied by citizen (${params.cropLabel || 'Focused'}, ${params.cropZoom}x magnification). Focus directly on target vehicle and violation in central frame.`
+    : '';
+
   const prompt = `You are RoadWatch AI (Qwen2.5-VL 72B) traffic enforcement auditor.
-Review the provided video frame for actionable traffic violations.
+Review the provided video frame for actionable traffic violations.${cropNote}
 
 RECOGNIZED VIOLATIONS:
 ${COMPACT_VIOLATION_TAXONOMY}
