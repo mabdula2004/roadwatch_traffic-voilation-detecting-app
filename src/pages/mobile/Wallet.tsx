@@ -674,7 +674,7 @@ export function Wallet({ onSelectFine }: WalletProps) {
                             </Text>
                           </View>
                           <Text style={[styles.fineCardId, { color: colors.muted }]}>
-                            {c.reportId ? `Case #${c.reportId.slice(0, 10)}` : c.citationId} · {dt.date}
+                            {dt.full}
                           </Text>
                         </View>
 

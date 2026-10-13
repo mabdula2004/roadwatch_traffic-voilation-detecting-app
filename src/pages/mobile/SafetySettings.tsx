@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Linking } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Siren, Phone, EyeOff, Search, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useUserProfile } from '../../contexts/UserContext';
@@ -43,14 +44,13 @@ export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProp
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.canvas }]}>
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.canvas, borderBottomColor: colors.edge }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('safetyAndPrivacy')}</Text>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>{t('safetySub')}</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.canvas }]}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Header without separating border line */}
+        <View style={styles.header}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{t('safetyAndPrivacy')}</Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>{t('safetySub')}</Text>
+        </View>
 
         {/* SOS Button */}
         <TouchableOpacity style={[styles.sosCard, { backgroundColor: colors.signal }]} onPress={handleSos} activeOpacity={0.85}>
@@ -100,7 +100,7 @@ export function SafetySettings({ onBack, onOpenPlateSearch }: SafetySettingsProp
           <ChevronRight size={18} color={colors.textMuted} />
         </TouchableOpacity>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -110,20 +110,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.canvas,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 48,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.edge,
-    backgroundColor: Colors.canvas,
+    marginBottom: 16,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '800',
     color: Colors.text,
+    marginBottom: 4,
   },
   shieldBadge: {
     backgroundColor: 'rgba(34, 197, 94, 0.15)',
@@ -143,6 +136,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 13,
     color: Colors.textMuted,
+    lineHeight: 18,
   },
   sosCard: {
     marginTop: 16,
