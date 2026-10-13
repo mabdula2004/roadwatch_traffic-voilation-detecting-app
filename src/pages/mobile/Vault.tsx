@@ -55,6 +55,19 @@ import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+function formatDateTime(isoString?: string): { date: string; time: string; full: string } {
+  if (!isoString) return { date: 'N/A', time: '', full: 'N/A' };
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return { date: isoString, time: '', full: isoString };
+    const date = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return { date, time, full: `${date} · ${time}` };
+  } catch {
+    return { date: isoString, time: '', full: isoString };
+  }
+}
+
 type ReportRow = {
   report_id: string;
   claimed_class: string;
@@ -580,7 +593,7 @@ export function Vault() {
                             : r.claimed_class.replace(/_/g, ' ').toUpperCase()}
                         </Text>
                         <Text style={[styles.cardSub, { color: colors.muted }]}>
-                          {r.report_id.slice(0, 10)} · {new Date(r.captured_at).toLocaleDateString()}
+                          {formatDateTime(r.captured_at).full}
                         </Text>
                       </View>
 
@@ -769,7 +782,7 @@ export function Vault() {
                         ? (isUrdu ? 'نتیجہ' : 'Result')
                         : u.claimed_class.replace(/_/g, ' ')}
                     </Text>
-                    <Text style={[styles.cardSub, { color: colors.muted }]}>{new Date(u.captured_at).toLocaleString()} · {u.report_id.slice(0, 8)}</Text>
+                    <Text style={[styles.cardSub, { color: colors.muted }]}>{formatDateTime(u.captured_at).full}</Text>
                   </View>
                   <View style={[styles.badge, styles.badgeMuted]}>
                     <Text style={[styles.badgeText, { color: colors.ink }]}>{u.status === 'failed' ? (isUrdu ? 'ناکام' : 'Failed') : t('pendingUpload')}</Text>
