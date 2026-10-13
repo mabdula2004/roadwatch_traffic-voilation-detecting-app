@@ -933,7 +933,9 @@ export function Vault() {
               <View style={styles.dossierSection}>
                 <View style={styles.sectionHeaderRow}>
                   <Text style={[styles.dossierSectionTitle, { color: colors.muted }]}>
-                    {t('threeFramesInspected').toUpperCase()}
+                    {selectedReport.frame_uris && selectedReport.frame_uris.length === 1
+                      ? (isUrdu ? 'خلاف ورزی کا تصدیقی ثبوت (کلیدی فریم)' : 'DECISIVE EVIDENCE KEYFRAME')
+                      : t('threeFramesInspected').toUpperCase()}
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     <Maximize2 size={11} color={colors.telemetry} />

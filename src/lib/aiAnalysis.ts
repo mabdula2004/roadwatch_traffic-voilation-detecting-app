@@ -45,7 +45,10 @@ export interface AiEvidentiaryResult {
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
 const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen2.5-vl-72b-instruct';
 
-const VIOLATION_LIST_PROMPT = VIOLATION_TAXONOMY.map(v => `- ${v.code} (${v.name}): ${v.description}`).join('\n');
+const COMPACT_VIOLATION_TAXONOMY =
+  'red_light_running, helmet_violation, wrong_way_driving, triple_riding, illegal_u_turn, ' +
+  'lane_straddling_violation, blocking_crossing, footpath_driving, no_plate, fancy_tinted_plate, ' +
+  'phone_use_while_driving, seatbelt_violation, speeding_reckless, emergency_obstruction';
 
 /**
  * Reads an image file URI as Base64 in React Native without Expo Go sandbox permission blocks
@@ -94,14 +97,12 @@ async function extractVideoFrames(videoUri?: string, durationMs: number = 5000):
     await new Promise(r => setTimeout(r, 200));
 
     const dur = Math.max(durationMs, 5000);
-    // Sample 3 key evidentiary frames focused specifically on the violation sequence:
-    // Frame 1 (30%): Approach & vehicle baseline positioning
-    // Frame 2 (55%): The decisive violation moment (critical point of infraction)
-    // Frame 3 (80%): Vehicle license plate identification and departure
+    // Sample 2 decisive evidentiary moments:
+    // Frame 1: Decisive focal moment (55% duration, optimal focus & infraction)
+    // Frame 2: Approach & initial road positioning (35% duration)
     const times = [
-      Math.max(600, Math.floor(dur * 0.30)),
-      Math.max(2200, Math.floor(dur * 0.55)),
-      Math.max(3800, Math.floor(dur * 0.80)),
+      Math.max(2000, Math.floor(dur * 0.55)),
+      Math.max(700, Math.floor(dur * 0.35)),
     ];
 
     for (const time of times) {
@@ -197,72 +198,39 @@ export async function analyzeTrafficViolation(params: {
     };
   }
 
-  const prompt = `You are RoadWatch AI powered by Qwen2.5-VL, a strict evidentiary traffic-violation vision system.
-You are reviewing ${frames.length} sampled frames across a citizen's traffic recording in chronological order.
+  const prompt = `You are RoadWatch AI (Qwen2.5-VL 72B) traffic enforcement auditor.
+Review the provided video frame for actionable traffic violations.
 
-YOUR PRIMARY MISSION: TRAFFIC VIOLATION ENFORCEMENT AUDIT (SECTION 15 EVIDENTIARY PRD).
-Determine whether an actionable traffic violation occurred with legal evidentiary certainty, or whether the case must be closed as compliant, blurred, or low-clarity.
+RECOGNIZED VIOLATIONS:
+${COMPACT_VIOLATION_TAXONOMY}
 
-TAXONOMY OF RECOGNIZED VIOLATIONS:
-${VIOLATION_LIST_PROMPT}
+STRICT EVIDENTIARY CONSTRAINTS:
+1. DETECT: Identify if any vehicle commits a listed violation. If none, set "violation_detected": false, "rejection_reason": "no_violation".
+2. ZERO-GUESSING PLATE: Extract "plate_number" ONLY if 100% sharp and vehicle violated traffic law. If distant, motion-blurred or shadowed, set "plate_number": null, "plate_status": "blurred", "rejection_reason": "plate_blurred". NEVER extrapolate digits.
+3. ISOLATE: Target and extract attributes (make/model/color) exclusively for the violating vehicle. Ignore compliant traffic.
 
-STRICT EVIDENTIARY & ANTI-HALLUCINATION RULES:
-
-1. ZERO-GUESSING LICENSE PLATE POLICY:
-   - NEVER guess, approximate, or extrapolate license plate numbers or characters under any circumstance.
-   - Every single character must be 100% sharp and distinct across frames.
-   - If distant, pixelated, motion-blurred, or shadowed: set "plate_number": null, "plate_status": "blurred", "plate_confidence": 0.0, "rejection_reason": "plate_blurred".
-
-2. MULTI-VEHICLE ISOLATION & ATTRIBUTION RULE:
-   - If ONE vehicle commits a violation: STRICTLY ISOLATE THE VIOLATING VEHICLE. Output fields must exclusively match the violating vehicle. Ignore surrounding compliant vehicles.
-   - If NO vehicle commits a violation: Set "violation_detected": false, "violation_type": null, "rejection_reason": "no_violation", "plate_number": null.
-
-3. FOOTAGE CLARITY & SCALE:
-   - If blurry/dark/unclear: "clarity_score": < 0.50, "rejection_reason": "low_clarity", "plate_number": null.
-   - If target vehicle is too far away (> 25-30m): "vehicle_distance": "too_far", "rejection_reason": "vehicle_too_far".
-
-4. SPECIFIC VIOLATIONS:
-   - "red_light_running": signal is red AND vehicle actively crosses stop line into intersection.
-   - "helmet_violation": motorcycle rider/passenger without safety helmet on public road.
-
-5. EVIDENTIARY 3-FRAME SEQUENCE:
-   - Identify which frame (1, 2, or 3) decisively shows the violation (typically Frame 2).
-   - Set "violation_frame_index": 1, 2, or 3.
-   - Provide "frame_descriptions": 3 concise strings explaining what each frame visually proves.
-
-Respond ONLY with a single JSON object (no markdown, no backticks):
+Output ONLY valid JSON:
 {
-  "violation_detected": true or false,
+  "violation_detected": boolean,
   "violation_type": string or null,
-  "violation_frame_index": 1 | 2 | 3,
-  "frame_descriptions": ["description for Frame 1", "description for Frame 2", "description for Frame 3"],
-  "vehicle_distance": "optimal" | "too_far" | "too_close",
-  "plate_status": "clear" | "blurred" | "too_far" | "obscured" | "missing",
+  "vehicle_distance": "optimal" | "too_far",
+  "plate_status": "clear" | "blurred" | "missing",
   "plate_number": string or null,
   "plate_confidence": number,
   "clarity_score": number,
   "vehicle_make_model": string,
   "vehicle_color": string,
   "vehicle_type": string,
-  "rejection_reason": "none" | "plate_blurred" | "vehicle_too_far" | "low_clarity" | "no_violation" | "emergency_exemption",
+  "rejection_reason": "none" | "plate_blurred" | "vehicle_too_far" | "low_clarity" | "no_violation",
   "reasoning": string
 }`;
 
-  // For Qwen 2.5-VL 72B Instruct: Select the 2 key evidentiary frames (approach + infraction moment)
-  // to ensure prompt tokens stay strictly within OpenRouter credit limit (< 3,851 tokens).
-  // Note: All 3 frames remain preserved on device for full inspection in Evidence Vault!
-  const inferenceFrames = frames.length > 2 ? [frames[0], frames[1]] : frames;
-
-  const userContent: any[] = [{ type: 'text', text: prompt }];
-
-  for (const b64 of inferenceFrames) {
-    userContent.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:image/jpeg;base64,${b64}`,
-      },
-    });
-  }
+  // Primary decisive violation keyframe (~414 tokens, fits safely within limit!)
+  const primaryFrame = frames[0];
+  const userContent: any[] = [
+    { type: 'text', text: prompt },
+    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${primaryFrame}` } },
+  ];
 
   let isCreditLimitError = false;
 
@@ -271,12 +239,11 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const modelToUse = AI_MODEL;
-      // On retry if needed, use single most decisive violation keyframe
       let effectiveContent = userContent;
-      if (attempt > 0 && inferenceFrames.length > 1) {
+      if (attempt > 0 && frames.length > 1) {
         effectiveContent = [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${inferenceFrames[1] || inferenceFrames[0]}` } },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[1]}` } },
         ];
       }
 
@@ -499,16 +466,19 @@ function formatResult(
     ? Number(parsed.violation_frame_index)
     : (status === 'fined' ? 2 : 1);
 
+  // Proving evidentiary frame(s):
+  // Preserve and display ONLY the decisive frame where violation is proven!
+  const safeFrames = framesBase64 || [];
+  const decisiveFrames = safeFrames.length > 0 ? [safeFrames[0]] : [];
+
   let frameDescriptions: string[] = [];
-  if (Array.isArray(parsed.frame_descriptions) && parsed.frame_descriptions.length === 3) {
-    frameDescriptions = parsed.frame_descriptions.map(String);
+  if (status === 'fined') {
+    frameDescriptions = [
+      `⚡ DECISIVE EVIDENCE: ${violationMeta?.name || 'Violation Confirmed'}`,
+    ];
   } else {
     frameDescriptions = [
-      'Frame 1: Approach & Initial Road Positioning',
-      status === 'fined'
-        ? `Frame 2: ⚡ VIOLATION MOMENT - ${violationMeta?.name || 'Critical Infraction Observed'}`
-        : 'Frame 2: Lawful Trajectory (No Violation Observed)',
-      'Frame 3: Vehicle Trajectory & License Plate Identification',
+      'Evidentiary Traffic Frame (Lawful)',
     ];
   }
 
@@ -539,8 +509,8 @@ function formatResult(
       : 'Report verified. No citation issued.',
     analyzedAt: new Date().toISOString(),
     locationName,
-    framesBase64,
-    violationFrameIndex,
+    framesBase64: decisiveFrames,
+    violationFrameIndex: 1,
     frameDescriptions,
   };
 }
