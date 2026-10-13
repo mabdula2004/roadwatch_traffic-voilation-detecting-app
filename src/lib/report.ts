@@ -17,6 +17,7 @@ export interface CapturedClip {
   trimEndMs?: number;
   cropZoom?: number;
   cropLabel?: string;
+  cropRect?: { x: number; y: number; width: number; height: number };
   framesBase64?: string[];
 }
 
