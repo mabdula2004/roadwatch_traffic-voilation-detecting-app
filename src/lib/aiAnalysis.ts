@@ -42,7 +42,7 @@ export interface AiEvidentiaryResult {
   frameDescriptions?: string[]; // Explanatory breakdown of why each frame proves or monitors the violation
 }
 
-const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
+const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
 const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen2.5-vl-72b-instruct';
 
 const COMPACT_VIOLATION_TAXONOMY =
