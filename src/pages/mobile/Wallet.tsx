@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -234,15 +235,29 @@ export function Wallet({ onSelectFine }: WalletProps) {
   }, [loadData]);
 
   const handleTopUp = async (amount: number) => {
-    const res = await rechargeWalletBalance(amount, {
-      title: isUrdu ? 'والیٹ ٹاپ اپ (ای پے)' : 'Wallet Top-Up (ePay)',
-      subtitle: isUrdu ? 'منسلک ای پے اکاؤنٹ سے بیلنس ریچارج' : 'Direct balance credit via linked ePay',
-      type: 'top_up',
-    });
-    if (res.success) {
-      setWallet(prev => prev ? { ...prev, balance: res.newBalance } : { balance: res.newBalance, pending_clearance: 0, epay_linked: true });
-      void loadData();
-    }
+    Alert.alert(
+      isUrdu ? 'والیٹ ریچارج' : 'Top-Up Wallet',
+      isUrdu
+        ? `کیا آپ واقعی اپنے والیٹ میں PKR ${amount.toLocaleString()} کا بیلنس شامل کرنا چاہتے ہیں؟`
+        : `Are you sure you want to recharge PKR ${amount.toLocaleString()} into your wallet?`,
+      [
+        { text: isUrdu ? 'منسوخ کریں' : 'Cancel', style: 'cancel' },
+        {
+          text: isUrdu ? 'ریچارج کریں' : 'Confirm Recharge',
+          onPress: async () => {
+            const res = await rechargeWalletBalance(amount, {
+              title: isUrdu ? 'والیٹ ٹاپ اپ (ای پے)' : 'Wallet Top-Up (ePay)',
+              subtitle: isUrdu ? 'منسلک ای پے اکاؤنٹ سے بیلنس ریچارج' : 'Direct balance credit via linked ePay',
+              type: 'top_up',
+            });
+            if (res.success) {
+              setWallet(prev => prev ? { ...prev, balance: res.newBalance } : { balance: res.newBalance, pending_clearance: 0, epay_linked: true });
+              void loadData();
+            }
+          },
+        },
+      ]
+    );
   };
 
   const filteredTransactions = useMemo(() => {

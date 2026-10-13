@@ -504,7 +504,12 @@ export async function updateReportStatus(
 
     // If user paid PKR 100 to dispute, refund the automatic PKR 50 false report penalty
     if (penaltyToRefund > 0) {
-      await rechargeWalletBalance(penaltyToRefund).catch(() => {});
+      await rechargeWalletBalance(penaltyToRefund, {
+        title: 'Penalty Waiver Refund',
+        subtitle: 'Automated PKR 50 false report penalty waived and credited back',
+        type: 'review_refund_bonus',
+        reportId: reportIdentifier,
+      }).catch(() => {});
       await updateCitationStatus(reportIdentifier, 'disputed_in_review');
     }
   } catch (e) {
@@ -557,7 +562,12 @@ export async function resolveHumanReview(
     if (verdict === 'accepted') {
       // 100% Review Fee Refund (PKR 100) + Reward Prize (PKR 200) = Total PKR 300 to citizen wallet
       payoutPkr = 300;
-      await rechargeWalletBalance(300);
+      await rechargeWalletBalance(300, {
+        title: 'Officer Review Payout (Refund + Reward)',
+        subtitle: 'Review fee refunded and full bounty rewarded',
+        type: 'review_refund_bonus',
+        reportId,
+      });
       await updateCitationStatus(reportId, 'waived');
     } else {
       // Fee of PKR 100 is forfeited / lost
