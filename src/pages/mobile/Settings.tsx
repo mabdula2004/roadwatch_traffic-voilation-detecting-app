@@ -118,7 +118,6 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
   const rawCnicDigits = profile.cnic ? profile.cnic.replace(/\D/g, '') : '';
   const cnicLast4 = rawCnicDigits ? rawCnicDigits.slice(-4) : (profile.cnic?.includes('•') ? profile.cnic.slice(-4) : '8899');
   const cnicDisplay = `CNIC ••••••••${cnicLast4}`;
-  const plateDisplay = profile.plate ? profile.plate : t('noPlateRegistered');
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
@@ -128,7 +127,7 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
           <View>
             <Text style={[styles.profileName, { color: colors.ink }]}>{displayName}</Text>
             <Text style={[styles.profileSub, { color: colors.muted }]}>
-              {cnicDisplay} · {plateDisplay}
+              {cnicDisplay}
             </Text>
           </View>
           <TouchableOpacity

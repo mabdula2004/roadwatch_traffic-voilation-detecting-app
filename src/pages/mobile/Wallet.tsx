@@ -180,8 +180,16 @@ export function Wallet({ onSelectFine }: WalletProps) {
   const [filter, setFilter] = useState<FilterType>('all');
   const [showAllTransactions, setShowAllTransactions] = useState<boolean>(false);
   const [showAllCitations, setShowAllCitations] = useState<boolean>(false);
+  const [expandedCitationIds, setExpandedCitationIds] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState('');
+
+  const toggleCitationExpand = (id: string) => {
+    setExpandedCitationIds(prev => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
 
   const loadData = useCallback(async () => {
     try {
@@ -281,9 +289,7 @@ export function Wallet({ onSelectFine }: WalletProps) {
         {/* Title & Subtitle */}
         <Text style={[styles.title, { color: colors.ink }]}>{t('citizenWallet')}</Text>
         <Text style={[styles.subtitle, { color: colors.muted }]}>
-          {profile.plate
-            ? (isUrdu ? `${profile.plate} پر انعامی رقم، چالان اور تمام لین دین کی ہسٹری` : `Reward balance, citations & transaction history for ${profile.plate}`)
-            : t('walletSubtitle')}
+          {t('walletSubtitle')}
         </Text>
 
         {/* Primary Reward & Balance Card */}
@@ -624,6 +630,7 @@ export function Wallet({ onSelectFine }: WalletProps) {
                   const isPaid = c.status === 'paid_from_wallet';
                   const isDisputed = c.status === 'disputed_in_review';
                   const isWaived = c.status === 'waived';
+                  const isExpanded = !!expandedCitationIds[c.citationId];
 
                   return (
                     <View
@@ -632,128 +639,123 @@ export function Wallet({ onSelectFine }: WalletProps) {
                         styles.detailedFineCard,
                         {
                           backgroundColor: colors.surface,
-                          borderColor: isPaid ? 'rgba(239, 68, 68, 0.4)' : isDisputed ? 'rgba(245, 158, 11, 0.4)' : 'rgba(16, 185, 129, 0.4)',
+                          borderColor: isPaid ? 'rgba(239, 68, 68, 0.35)' : isDisputed ? 'rgba(245, 158, 11, 0.35)' : 'rgba(16, 185, 129, 0.35)',
                         },
                       ]}
                     >
-                      {/* Top Header Row */}
-                      <View style={styles.fineHeaderRow}>
+                      {/* Compact Clickable Header Toggle */}
+                      <TouchableOpacity
+                        style={styles.fineHeaderRow}
+                        onPress={() => toggleCitationExpand(c.citationId)}
+                        activeOpacity={0.7}
+                      >
                         <View style={{ flex: 1, paddingRight: 8 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <AlertTriangle size={16} color={colors.signal} />
-                            {/* CLEAN TITLE: NO §19 ANYWHERE */}
-                            <Text style={[styles.fineCardTitle, { color: colors.ink }]}>
-                              {isUrdu ? 'غلط رپورٹ جمع کروانے کا چالان' : 'False Report Submission Penalty'}
+                            <AlertTriangle size={15} color={colors.signal} />
+                            <Text style={[styles.fineCardTitle, { color: colors.ink }]} numberOfLines={1}>
+                              {isUrdu ? 'غلط رپورٹ چالان' : 'False Report Fine'}
                             </Text>
                           </View>
                           <Text style={[styles.fineCardId, { color: colors.muted }]}>
-                            {c.citationId} · {c.reportId ? `Case #${c.reportId.slice(0, 16)}` : ''}
+                            {c.reportId ? `Case #${c.reportId.slice(0, 10)}` : c.citationId} · {dt.date}
                           </Text>
                         </View>
 
-                        {/* Amount & Status Badge */}
-                        <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={[styles.fineAmountLarge, { color: colors.signal }]}>
-                            PKR {c.amountPkr}
-                          </Text>
-                          <View
-                            style={[
-                              styles.fineStatusBadge,
-                              {
-                                backgroundColor: isPaid
-                                  ? 'rgba(16, 185, 129, 0.15)'
-                                  : isDisputed
-                                  ? 'rgba(245, 158, 11, 0.15)'
-                                  : 'rgba(6, 182, 212, 0.15)',
-                              },
-                            ]}
-                          >
-                            <Text
+                        {/* Right Amount, Status & Dropdown Chevron */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={[styles.fineAmountLarge, { color: colors.signal }]}>
+                              PKR {c.amountPkr}
+                            </Text>
+                            <View
                               style={[
-                                styles.fineStatusBadgeText,
+                                styles.fineStatusBadge,
                                 {
-                                  color: isPaid
-                                    ? colors.valid
+                                  backgroundColor: isPaid
+                                    ? 'rgba(16, 185, 129, 0.15)'
                                     : isDisputed
-                                    ? colors.accent
-                                    : colors.telemetry,
+                                    ? 'rgba(245, 158, 11, 0.15)'
+                                    : 'rgba(6, 182, 212, 0.15)',
                                 },
                               ]}
                             >
-                              {isPaid
-                                ? (isUrdu ? 'والیٹ سے ادا شدہ' : 'Paid from Wallet')
-                                : isDisputed
-                                ? (isUrdu ? 'زیر سماعت / وارڈن جائزہ' : 'Disputed / In Review')
-                                : (isUrdu ? 'معاف شدہ' : 'Waived & Refunded')}
-                            </Text>
+                              <Text
+                                style={[
+                                  styles.fineStatusBadgeText,
+                                  {
+                                    color: isPaid
+                                      ? colors.valid
+                                      : isDisputed
+                                      ? colors.accent
+                                      : colors.telemetry,
+                                  },
+                                ]}
+                              >
+                                {isPaid
+                                  ? (isUrdu ? 'ادا شدہ' : 'PAID')
+                                  : isDisputed
+                                  ? (isUrdu ? 'زیر جائزہ' : 'IN REVIEW')
+                                  : (isUrdu ? 'معاف شدہ' : 'WAIVED')}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={[styles.fineChevronBox, { backgroundColor: colors.canvas }]}>
+                            {isExpanded ? (
+                              <ChevronUp size={15} color={colors.muted} />
+                            ) : (
+                              <ChevronDown size={15} color={colors.muted} />
+                            )}
                           </View>
                         </View>
-                      </View>
+                      </TouchableOpacity>
 
-                      {/* Divider */}
-                      <View style={[styles.cardDivider, { backgroundColor: colors.edge }]} />
+                      {/* Expandable Details Accordion */}
+                      {isExpanded && (
+                        <View style={{ marginTop: 8 }}>
+                          <View style={[styles.cardDivider, { backgroundColor: colors.edge }]} />
 
-                      {/* Detail 1: Exact Date and Time */}
-                      <View style={styles.detailRow}>
-                        <View style={styles.detailItem}>
-                          <Calendar size={13} color={colors.muted} />
-                          <Text style={[styles.detailItemLabel, { color: colors.muted }]}>
-                            {t('incidentTime')}:
-                          </Text>
-                          <Text style={[styles.detailItemValue, { color: colors.ink }]}>
-                            {dt.full}
-                          </Text>
-                        </View>
-                      </View>
+                          {/* Detail 1: Exact Date and Time */}
+                          <View style={styles.detailRow}>
+                            <View style={styles.detailItem}>
+                              <Calendar size={12} color={colors.muted} />
+                              <Text style={[styles.detailItemLabel, { color: colors.muted }]}>
+                                {t('incidentTime')}:
+                              </Text>
+                              <Text style={[styles.detailItemValue, { color: colors.ink }]}>
+                                {dt.full}
+                              </Text>
+                            </View>
+                          </View>
 
-                      {/* Detail 2: Incident Location */}
-                      <View style={styles.detailRow}>
-                        <View style={styles.detailItem}>
-                          <MapPin size={13} color={colors.signal} />
-                          <Text style={[styles.detailItemLabel, { color: colors.muted }]}>
-                            {t('incidentLocation')}:
-                          </Text>
-                          <Text style={[styles.detailItemValue, { color: colors.ink }]} numberOfLines={2}>
-                            {c.locationName
-                              ? c.locationName
-                              : c.latitude && c.longitude
-                              ? `${c.latitude.toFixed(4)}° N, ${c.longitude.toFixed(4)}° E`
-                              : (isUrdu ? 'لاہور اربن سیکٹر (جی پی ایس ٹیگ)' : 'Lahore Sector (GPS Tagged)')}
-                          </Text>
-                        </View>
-                      </View>
+                          {/* Detail 2: Incident Location */}
+                          <View style={styles.detailRow}>
+                            <View style={styles.detailItem}>
+                              <MapPin size={12} color={colors.signal} />
+                              <Text style={[styles.detailItemLabel, { color: colors.muted }]}>
+                                {t('incidentLocation')}:
+                              </Text>
+                              <Text style={[styles.detailItemValue, { color: colors.ink }]} numberOfLines={2}>
+                                {c.locationName
+                                  ? c.locationName
+                                  : c.latitude && c.longitude
+                                  ? `${c.latitude.toFixed(4)}° N, ${c.longitude.toFixed(4)}° E`
+                                  : (isUrdu ? 'لاہور اربن سیکٹر (جی پی ایس)' : 'Lahore Sector (GPS)')}
+                              </Text>
+                            </View>
+                          </View>
 
-                      {/* Detail 3: Official Enforcement Reason */}
-                      <View style={[styles.reasonContainer, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                          <Scale size={12} color={colors.muted} />
-                          <Text style={[styles.reasonHeader, { color: colors.muted }]}>
-                            {t('violationReason')}:
-                          </Text>
-                        </View>
-                        <Text style={[styles.reasonBody, { color: colors.ink }]}>
-                          {c.reason}
-                        </Text>
-                      </View>
-
-                      {/* Advisory footer */}
-                      {isPaid && (
-                        <View style={[styles.disputeNoticeBox, { backgroundColor: 'rgba(6, 182, 212, 0.08)' }]}>
-                          <Text style={[styles.disputeNoticeText, { color: colors.muted }]}>
-                            {isUrdu
-                              ? 'اگر آپ کو اس فیصلے سے اختلاف ہے تو آپ شواہد والٹ میں جا کر ٹریفک وارڈن کے لیے مینوئل ریویو کی درخواست دے سکتے ہیں۔'
-                              : 'If you believe this automated decision was in error, you can escalate this case for certified Traffic Warden review in Evidence Vault.'}
-                          </Text>
-                        </View>
-                      )}
-
-                      {isDisputed && (
-                        <View style={[styles.disputeNoticeBox, { backgroundColor: 'rgba(245, 158, 11, 0.08)' }]}>
-                          <Text style={[styles.disputeNoticeText, { color: colors.accent }]}>
-                            {isUrdu
-                              ? 'کیس وارڈن کے جائزے میں ہے: خلاف ورزی ثابت ہونے پر یہ 50 روپے واپس ہوں گے اور 300 روپے آپ کے والیٹ میں شامل کیے جائیں گے۔'
-                              : 'Under Officer Review: If warden confirms the violation, this PKR 50 penalty is waived and PKR 300 total will be credited to your wallet.'}
-                          </Text>
+                          {/* Detail 3: Official Enforcement Reason */}
+                          <View style={[styles.reasonContainer, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 3 }}>
+                              <Scale size={11} color={colors.muted} />
+                              <Text style={[styles.reasonHeader, { color: colors.muted }]}>
+                                {t('violationReason')}:
+                              </Text>
+                            </View>
+                            <Text style={[styles.reasonBody, { color: colors.ink }]}>
+                              {c.reason}
+                            </Text>
+                          </View>
                         </View>
                       )}
                     </View>
@@ -1049,44 +1051,52 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   detailedFineCard: {
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderWidth: 1,
   },
   fineHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   fineCardTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   fineCardId: {
     fontSize: 10,
     fontWeight: '500',
-    marginTop: 3,
+    marginTop: 2,
   },
   fineAmountLarge: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '800',
   },
   fineStatusBadge: {
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 6,
-    marginTop: 4,
+    borderRadius: 5,
+    marginTop: 2,
   },
   fineStatusBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
+    fontSize: 8.5,
+    fontWeight: '800',
+  },
+  fineChevronBox: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardDivider: {
     height: StyleSheet.hairlineWidth,
-    marginVertical: 10,
+    marginVertical: 8,
   },
   detailRow: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
   detailItem: {
     flexDirection: 'row',
@@ -1094,40 +1104,30 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   detailItemLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '600',
   },
   detailItemValue: {
     flex: 1,
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '700',
   },
   reasonContainer: {
-    padding: 10,
-    borderRadius: 10,
+    padding: 8,
+    borderRadius: 8,
     borderWidth: 1,
-    marginTop: 4,
-    marginBottom: 8,
+    marginTop: 2,
+    marginBottom: 2,
   },
   reasonHeader: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   reasonBody: {
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '500',
-  },
-  disputeNoticeBox: {
-    padding: 8,
-    borderRadius: 8,
-    marginTop: 2,
-  },
-  disputeNoticeText: {
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 10.5,
+    lineHeight: 15,
     fontWeight: '500',
   },
   emptyCard: {
