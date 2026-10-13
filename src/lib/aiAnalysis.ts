@@ -43,7 +43,7 @@ export interface AiEvidentiaryResult {
 }
 
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
-const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen3-vl-8b-instruct';
+const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen2.5-vl-72b-instruct';
 
 const VIOLATION_LIST_PROMPT = VIOLATION_TAXONOMY.map(v => `- ${v.code} (${v.name}): ${v.description}`).join('\n');
 
@@ -248,9 +248,14 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
   "reasoning": string
 }`;
 
+  // For Qwen 2.5-VL 72B Instruct: Select the 2 key evidentiary frames (approach + infraction moment)
+  // to ensure prompt tokens stay strictly within OpenRouter credit limit (< 3,851 tokens).
+  // Note: All 3 frames remain preserved on device for full inspection in Evidence Vault!
+  const inferenceFrames = frames.length > 2 ? [frames[0], frames[1]] : frames;
+
   const userContent: any[] = [{ type: 'text', text: prompt }];
 
-  for (const b64 of frames) {
+  for (const b64 of inferenceFrames) {
     userContent.push({
       type: 'image_url',
       image_url: {
@@ -261,23 +266,17 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
 
   let isCreditLimitError = false;
 
-  // Verified vision models on OpenRouter (lightweight token usage to avoid 402/429)
-  const candidateModels = Array.from(new Set([
-    AI_MODEL,
-    'qwen/qwen3-vl-8b-instruct',
-    'qwen/qwen3-vl-30b-a3b-instruct',
-  ]));
+  const MAX_ATTEMPTS = 2;
 
-  for (let attempt = 0; attempt < candidateModels.length; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      const modelToUse = candidateModels[attempt];
-      // On retry if previous attempt hit token or rate limit, use the 2 decisive violation frames
+      const modelToUse = AI_MODEL;
+      // On retry if needed, use single most decisive violation keyframe
       let effectiveContent = userContent;
-      if (attempt > 0 && frames.length > 2) {
+      if (attempt > 0 && inferenceFrames.length > 1) {
         effectiveContent = [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[0]}` } },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[1]}` } },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${inferenceFrames[1] || inferenceFrames[0]}` } },
         ];
       }
 
@@ -302,7 +301,7 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
         if (response.status === 402) {
           isCreditLimitError = true;
         }
-        if (attempt < candidateModels.length - 1) {
+        if (attempt < MAX_ATTEMPTS - 1) {
           await new Promise(res => setTimeout(res, 800));
           continue;
         }
@@ -316,7 +315,7 @@ Respond ONLY with a single JSON object (no markdown, no backticks):
 
       return formatResult(caseId, parsed, params.claimedClass, locationName, frames);
     } catch (err: any) {
-      if (attempt < candidateModels.length - 1) {
+      if (attempt < MAX_ATTEMPTS - 1) {
         await new Promise(res => setTimeout(res, 800));
         continue;
       }
