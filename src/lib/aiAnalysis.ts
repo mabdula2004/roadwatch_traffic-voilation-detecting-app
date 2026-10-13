@@ -89,7 +89,11 @@ async function readImageUriAsBase64(uri: string): Promise<string | null> {
 /**
  * Extracts 3 representative JPEG frames across the video duration (token-optimized)
  */
-async function extractVideoFrames(videoUri?: string, durationMs: number = 5000): Promise<string[]> {
+async function extractVideoFrames(
+  videoUri?: string,
+  durationMs: number = 5000,
+  startMs: number = 0
+): Promise<string[]> {
   if (!videoUri) return [];
   const frames: string[] = [];
   try {
@@ -97,14 +101,14 @@ async function extractVideoFrames(videoUri?: string, durationMs: number = 5000):
     await new Promise(r => setTimeout(r, 200));
 
     const dur = Math.max(durationMs, 5000);
-    // Sample 3 representative evidentiary moments:
+    // Sample 3 representative evidentiary moments inside the trimmed window:
     // Frame 1: Approach & initial road positioning (30% duration)
     // Frame 2: Decisive focal moment (55% duration, optimal focus & infraction)
     // Frame 3: Plate track & exit (80% duration)
     const times = [
-      Math.max(700, Math.floor(dur * 0.30)),
-      Math.max(2000, Math.floor(dur * 0.55)),
-      Math.min(dur - 500, Math.floor(dur * 0.80)),
+      startMs + Math.max(500, Math.floor(dur * 0.30)),
+      startMs + Math.max(1500, Math.floor(dur * 0.55)),
+      startMs + Math.min(dur - 300, Math.floor(dur * 0.80)),
     ];
 
     for (const time of times) {
@@ -137,6 +141,8 @@ async function extractVideoFrames(videoUri?: string, durationMs: number = 5000):
 export async function analyzeTrafficViolation(params: {
   videoUri?: string;
   durationMs?: number;
+  trimStartMs?: number;
+  trimEndMs?: number;
   framesBase64?: string[];
   claimedClass: string;
   capturedAt: string;
@@ -167,8 +173,13 @@ export async function analyzeTrafficViolation(params: {
     } catch {}
   }
 
-  // Extract up to 3 real video frames for Qwen2.5-VL to inspect (token-optimized)
-  const extracted = await extractVideoFrames(params.videoUri, params.durationMs || 5000);
+  const startMs = params.trimStartMs || 0;
+  const effectiveDurMs = (params.trimEndMs && params.trimEndMs > startMs)
+    ? (params.trimEndMs - startMs)
+    : (params.durationMs || 5000);
+
+  // Extract up to 3 real video frames for Qwen to inspect (within the trimmed window)
+  const extracted = await extractVideoFrames(params.videoUri, effectiveDurMs, startMs);
   const frames = [...(params.framesBase64 || []), ...extracted]
     .filter(b => typeof b === 'string' && b.length > 50)
     .slice(0, 3);

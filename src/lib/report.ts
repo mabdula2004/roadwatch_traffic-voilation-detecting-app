@@ -13,6 +13,8 @@ export interface CapturedClip {
   locationName?: string;
   accuracy: number | null;
   durationMs: number;
+  trimStartMs?: number;
+  trimEndMs?: number;
   framesBase64?: string[];
 }
 
