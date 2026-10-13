@@ -25,6 +25,8 @@ import {
   FileText,
   Sparkles,
   Filter,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -176,6 +178,8 @@ export function Wallet({ onSelectFine }: WalletProps) {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('history');
   const [filter, setFilter] = useState<FilterType>('all');
+  const [showAllTransactions, setShowAllTransactions] = useState<boolean>(false);
+  const [showAllCitations, setShowAllCitations] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState('');
 
@@ -244,6 +248,22 @@ export function Wallet({ onSelectFine }: WalletProps) {
     }
     return transactions;
   }, [transactions, filter]);
+
+  const INITIAL_DISPLAY_COUNT = 5;
+
+  useEffect(() => {
+    setShowAllTransactions(false);
+  }, [filter]);
+
+  const displayedTransactions = useMemo(() => {
+    if (showAllTransactions) return filteredTransactions;
+    return filteredTransactions.slice(0, INITIAL_DISPLAY_COUNT);
+  }, [filteredTransactions, showAllTransactions]);
+
+  const displayedCitations = useMemo(() => {
+    if (showAllCitations) return citations;
+    return citations.slice(0, INITIAL_DISPLAY_COUNT);
+  }, [citations, showAllCitations]);
 
   const totalRewardsWon = useMemo(() => {
     return transactions
@@ -463,7 +483,7 @@ export function Wallet({ onSelectFine }: WalletProps) {
               </View>
             ) : filteredTransactions.length > 0 ? (
               <View style={styles.itemsList}>
-                {filteredTransactions.map(item => {
+                {displayedTransactions.map(item => {
                   const isPositive = item.amount > 0;
                   const dt = formatDateTime(item.timestamp);
 
@@ -545,6 +565,24 @@ export function Wallet({ onSelectFine }: WalletProps) {
                     </View>
                   );
                 })}
+                {filteredTransactions.length > INITIAL_DISPLAY_COUNT && (
+                  <TouchableOpacity
+                    style={[styles.showMoreBtn, { backgroundColor: colors.surface, borderColor: colors.edge }]}
+                    onPress={() => setShowAllTransactions(prev => !prev)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.showMoreText, { color: colors.telemetry }]}>
+                      {showAllTransactions
+                        ? (isUrdu ? 'کم دکھائیں (تازہ ترین 5)' : `Show Less (Latest ${INITIAL_DISPLAY_COUNT})`)
+                        : (isUrdu ? `مزید دکھائیں (+${filteredTransactions.length - INITIAL_DISPLAY_COUNT})` : `Show More (+${filteredTransactions.length - INITIAL_DISPLAY_COUNT} Transactions)`)}
+                    </Text>
+                    {showAllTransactions ? (
+                      <ChevronUp size={16} color={colors.telemetry} />
+                    ) : (
+                      <ChevronDown size={16} color={colors.telemetry} />
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               <View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
@@ -581,7 +619,7 @@ export function Wallet({ onSelectFine }: WalletProps) {
             {/* Citations List */}
             {citations.length > 0 ? (
               <View style={styles.itemsList}>
-                {citations.map((c) => {
+                {displayedCitations.map((c) => {
                   const dt = formatDateTime(c.issuedAt);
                   const isPaid = c.status === 'paid_from_wallet';
                   const isDisputed = c.status === 'disputed_in_review';
@@ -721,6 +759,24 @@ export function Wallet({ onSelectFine }: WalletProps) {
                     </View>
                   );
                 })}
+                {citations.length > INITIAL_DISPLAY_COUNT && (
+                  <TouchableOpacity
+                    style={[styles.showMoreBtn, { backgroundColor: colors.surface, borderColor: colors.edge }]}
+                    onPress={() => setShowAllCitations(prev => !prev)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.showMoreText, { color: colors.telemetry }]}>
+                      {showAllCitations
+                        ? (isUrdu ? 'کم دکھائیں (تازہ ترین 5)' : `Show Less (Latest ${INITIAL_DISPLAY_COUNT})`)
+                        : (isUrdu ? `مزید چالان دیکھیں (+${citations.length - INITIAL_DISPLAY_COUNT})` : `Show More (+${citations.length - INITIAL_DISPLAY_COUNT} Citations)`)}
+                    </Text>
+                    {showAllCitations ? (
+                      <ChevronUp size={16} color={colors.telemetry} />
+                    ) : (
+                      <ChevronDown size={16} color={colors.telemetry} />
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               <View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
@@ -1097,5 +1153,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 10,
     textAlign: 'center',
+  },
+  showMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 10,
+    gap: 8,
+  },
+  showMoreText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
