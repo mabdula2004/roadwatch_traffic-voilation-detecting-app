@@ -96,9 +96,11 @@ function buildSynthesizedTransactions(
           type: 'reward',
           amount: 200,
           title: isUrdu ? 'شہری انعامی رقم (تصدیق شدہ)' : 'Citizen Bounty Reward',
-          subtitle: rep.claimedClass
-            ? (isUrdu ? `${rep.claimedClass} خلاف ورزی پر تصدیق شدہ انعام` : `Verified ${rep.claimedClass} violation`)
-            : (isUrdu ? 'ٹریفک خلاف ورزی کی تصدیق پر انعام' : 'Verified violation bounty prize'),
+          subtitle: rep.aiResult?.violationName
+            ? (isUrdu ? `${rep.aiResult.violationName} پر تصدیق شدہ انعام` : `Verified ${rep.aiResult.violationName} prize`)
+            : (rep.claimedClass && rep.claimedClass !== 'auto_ai_detect'
+              ? (isUrdu ? `${rep.claimedClass} خلاف ورزی پر تصدیق شدہ انعام` : `Verified ${rep.claimedClass} violation`)
+              : (isUrdu ? 'ٹریفک خلاف ورزی کی تصدیق پر انعام' : 'Verified traffic violation bounty prize')),
           timestamp: rep.uploadedAt || rep.capturedAt || new Date().toISOString(),
           reportId: repId,
           locationName: rep.locationName,

@@ -48,12 +48,10 @@ import { supabase } from '../../lib/supabase';
 import {
   getLocalReports,
   getReportFrames,
-  updateReportStatus,
   deleteReports,
   getDeletedReportIds,
 } from '../../lib/report';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
-import { getWalletBalance, deductWalletBalance } from '../../lib/wallet';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -85,7 +83,6 @@ export function Vault() {
   const [activeTab, setActiveTab] = useState<'pending' | 'sealed'>('sealed');
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loadError, setLoadError] = useState('');
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   // Evidentiary Detail Dossier & Full-Screen Zoom Lightbox States
   const [selectedReport, setSelectedReport] = useState<ReportRow | null>(null);
@@ -233,47 +230,6 @@ export function Vault() {
   useEffect(() => {
     void loadReports();
   }, [loadReports]);
-
-  // Citizen escalation action: dispute an AI-rejected report for PKR 100 review fee
-  const handleRequestReviewFromVault = async (reportId: string) => {
-    try {
-      const state = await getWalletBalance();
-      if (state.balance < 100) {
-        Alert.alert(
-          isUrdu ? 'ناکافی بیلنس' : 'Insufficient Balance',
-          isUrdu
-            ? 'مینوئل ریویو کے لیے والیٹ میں کم از کم 100 روپے ہونا ضروری ہے۔ براہ کرم والیٹ ٹیب میں جا کر ریچارج کریں۔'
-            : 'Manual review requires PKR 100. Please top up funds in the Citizen Wallet tab.'
-        );
-        return;
-      }
-
-      setResolvingId(reportId);
-      const deduction = await deductWalletBalance(100, {
-        title: isUrdu ? 'ٹریفک وارڈن ریویو فیس' : 'Traffic Warden Review Fee',
-        subtitle: isUrdu ? `کیس ${reportId} برائے دستی جائزہ` : `Escalated case ${reportId} for warden audit`,
-        reportId: reportId,
-        type: 'manual_review_fee',
-      });
-      if (deduction.success) {
-        await updateReportStatus(reportId, 'under_review');
-        await loadReports();
-        if (selectedReport && selectedReport.report_id === reportId) {
-          setSelectedReport(prev => prev ? { ...prev, status: 'under_review' } : null);
-        }
-        Alert.alert(
-          isUrdu ? 'کامیابی سے جمع' : 'Submitted for Officer Review',
-          isUrdu
-            ? 'رپورٹ ٹریفک وارڈن کے جائزے کے لیے جمع ہو گئی ہے۔ 100 روپے فیس ادا کر دی گئی ہے۔'
-            : 'Case successfully escalated to Traffic Warden audit. PKR 100 review fee paid.'
-        );
-      }
-    } catch (e) {
-      console.error('Failed to escalate report from vault:', e);
-    } finally {
-      setResolvingId(null);
-    }
-  };
 
   const pending = reports.filter(r => r.status === 'awaiting_upload' || r.status === 'failed');
   const sealed = reports.filter(r => !pending.includes(r));
@@ -619,7 +575,9 @@ export function Vault() {
 
                       <View style={styles.cardInfo}>
                         <Text style={[styles.cardTitle, { color: colors.ink }]}>
-                          {r.claimed_class.replace(/_/g, ' ').toUpperCase()}
+                          {r.claimed_class === 'auto_ai_detect' || r.claimed_class?.toLowerCase().includes('auto_ai')
+                            ? (isUrdu ? 'نتیجہ' : 'Result')
+                            : r.claimed_class.replace(/_/g, ' ').toUpperCase()}
                         </Text>
                         <Text style={[styles.cardSub, { color: colors.muted }]}>
                           {r.report_id.slice(0, 10)} · {new Date(r.captured_at).toLocaleDateString()}
@@ -788,24 +746,6 @@ export function Vault() {
                       </View>
                     )}
                   </TouchableOpacity>
-
-                  {/* Citizen Dispute Button (ONLY for rejected reports that haven't been disputed yet and when not in selection mode) */}
-                  {!isSelectionMode && isRejected && !isOfficerRejected && (
-                    <TouchableOpacity
-                      style={[
-                        styles.escalateBtn,
-                        { borderColor: 'rgba(245, 158, 11, 0.4)', backgroundColor: 'rgba(245, 158, 11, 0.08)' },
-                      ]}
-                      activeOpacity={0.8}
-                      disabled={resolvingId === r.report_id}
-                      onPress={() => handleRequestReviewFromVault(r.report_id)}
-                    >
-                      <UserCheck size={14} color="#f59e0b" />
-                      <Text style={[styles.escalateBtnText, { color: '#f59e0b' }]}>
-                        {isUrdu ? 'افسر سے مینوئل ریویو کروائیں (100 روپے)' : 'Dispute & Request Warden Review (PKR 100)'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
               );
             })}
@@ -824,7 +764,11 @@ export function Vault() {
                     <Video size={16} color={colors.muted} />
                   </View>
                   <View style={styles.cardInfo}>
-                    <Text style={[styles.cardTitle, { color: colors.ink }]}>{u.claimed_class.replace(/_/g, ' ')}</Text>
+                    <Text style={[styles.cardTitle, { color: colors.ink }]}>
+                      {u.claimed_class === 'auto_ai_detect' || u.claimed_class?.toLowerCase().includes('auto_ai')
+                        ? (isUrdu ? 'نتیجہ' : 'Result')
+                        : u.claimed_class.replace(/_/g, ' ')}
+                    </Text>
                     <Text style={[styles.cardSub, { color: colors.muted }]}>{new Date(u.captured_at).toLocaleString()} · {u.report_id.slice(0, 8)}</Text>
                   </View>
                   <View style={[styles.badge, styles.badgeMuted]}>
@@ -1192,7 +1136,10 @@ export function Vault() {
                       <Text style={[styles.telemetryKey, { color: colors.muted }]}>Violation Class:</Text>
                     </View>
                     <Text style={[styles.telemetryVal, { color: colors.signal, fontWeight: '700' }]}>
-                      {selectedReport.claimed_class.replace(/_/g, ' ').toUpperCase()}
+                      {selectedReport.ai_result?.violationName ||
+                        (selectedReport.claimed_class === 'auto_ai_detect' || selectedReport.claimed_class?.toLowerCase().includes('auto_ai')
+                          ? (isUrdu ? 'نتیجہ' : 'Result')
+                          : selectedReport.claimed_class.replace(/_/g, ' ').toUpperCase())}
                     </Text>
                   </View>
 
@@ -1302,24 +1249,6 @@ export function Vault() {
                   </View>
                 </View>
               </View>
-
-              {/* Citizen Dispute Button inside Dossier (if rejected and not yet disputed) */}
-              {selectedReport.status === 'rejected' && selectedReport.officer_verdict !== 'rejected' && (
-                <TouchableOpacity
-                  style={[
-                    styles.escalateBtn,
-                    { borderColor: 'rgba(245, 158, 11, 0.4)', backgroundColor: 'rgba(245, 158, 11, 0.08)', marginHorizontal: 0 },
-                  ]}
-                  activeOpacity={0.8}
-                  disabled={resolvingId === selectedReport.report_id}
-                  onPress={() => handleRequestReviewFromVault(selectedReport.report_id)}
-                >
-                  <UserCheck size={16} color="#f59e0b" />
-                  <Text style={[styles.escalateBtnText, { color: '#f59e0b', fontSize: 13 }]}>
-                    {isUrdu ? 'افسر سے مینوئل ریویو کروائیں (100 روپے)' : 'Dispute Verdict & Request Warden Review (PKR 100)'}
-                  </Text>
-                </TouchableOpacity>
-              )}
 
               {/* Delete Report from Dossier (ONLY if accepted or rejected) */}
               {(selectedReport.status === 'accepted' || selectedReport.status === 'rejected') && (
