@@ -12,6 +12,7 @@ import {
   Image,
   Dimensions,
   PanResponder,
+  Modal,
 } from 'react-native';
 import {
   ChevronLeft,
@@ -76,6 +77,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   const { t, isUrdu } = useLanguage();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showRemakeModal, setShowRemakeModal] = useState(false);
 
   // Video Trimming & Editing State
   const totalDurationSec = Math.max(5, Math.round(clip.durationMs / 1000));
@@ -227,20 +229,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
   }
 
   function handleRemakeVideo() {
-    Alert.alert(
-      isUrdu ? 'دوبارہ ویڈیو ریکارڈ کریں؟' : 'Remake Evidence Video?',
-      isUrdu
-        ? 'کیا آپ موجودہ ریکارڈنگ منسوخ کر کے لائیو کیمرے سے نئی ویڈیو بنانا چاہتے ہیں؟'
-        : 'Do you want to discard this clip and return to live camera capture to record fresh footage?',
-      [
-        { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
-        {
-          text: isUrdu ? 'دوبارہ ریکارڈ کریں' : 'Discard & Remake',
-          style: 'destructive',
-          onPress: onBack,
-        },
-      ]
-    );
+    setShowRemakeModal(true);
   }
 
   async function handleSubmit() {
@@ -342,16 +331,6 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           <ChevronLeft size={20} color={Colors.textMuted} />
           <Text style={styles.backText}>{isUrdu ? 'کیمرہ' : 'Back'}</Text>
         </TouchableOpacity>
-
-        <View style={styles.headerRightActions}>
-          <TouchableOpacity style={styles.remakeHeaderBtn} onPress={handleRemakeVideo}>
-            <RotateCcw size={12} color="#ef4444" />
-            <Text style={styles.remakeHeaderText}>{isUrdu ? 'دوبارہ ریکارڈ' : 'Remake Video'}</Text>
-          </TouchableOpacity>
-          <View style={styles.draftBadge}>
-            <Text style={styles.draftText}>{isUrdu ? 'ڈرافٹ' : 'DRAFT'}</Text>
-          </View>
-        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -681,6 +660,56 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         </Text>
         {!!error && <Text accessibilityRole="alert" style={{ color: colors.signal, marginTop: 8, textAlign: 'center' }}>{error}</Text>}
       </ScrollView>
+
+      {/* Theme-Matching Discard & Remake Confirmation Modal */}
+      <Modal
+        visible={showRemakeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowRemakeModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+            <View style={styles.modalIconBadge}>
+              <RotateCcw size={28} color="#ef4444" />
+            </View>
+
+            <Text style={[styles.modalTitle, { color: colors.ink }]}>
+              {isUrdu ? 'ویڈیو مسترد اور دوبارہ ریکارڈ کریں؟' : 'Discard & Remake Video?'}
+            </Text>
+
+            <Text style={[styles.modalDesc, { color: colors.muted }]}>
+              {isUrdu
+                ? 'کیا آپ موجودہ ریکارڈنگ کو مسترد کر کے دوبارہ لائیو کیمرے پر واپس جانا چاہتے ہیں تاکہ نئی ویڈیو بن سکے؟ یہ کارروائی واپس نہیں ہو سکتی۔'
+                : 'Are you sure you want to discard this recorded evidence and return to the live camera to record fresh footage? This action cannot be undone.'}
+            </Text>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalDiscardBtn}
+                onPress={() => {
+                  setShowRemakeModal(false);
+                  onBack();
+                }}
+              >
+                <RotateCcw size={16} color="#ffffff" />
+                <Text style={styles.modalDiscardText}>
+                  {isUrdu ? 'ہاں، ویڈیو مسترد اور دوبارہ بنائیں' : 'Discard & Remake Video'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalCancelBtn, { borderColor: colors.edge, backgroundColor: colors.surfaceElevated }]}
+                onPress={() => setShowRemakeModal(false)}
+              >
+                <Text style={[styles.modalCancelText, { color: colors.ink }]}>
+                  {isUrdu ? 'منسوخ کریں (جائزہ جاری رکھیں)' : 'Keep Reviewing'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -711,38 +740,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  headerRightActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  remakeHeaderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-  },
-  remakeHeaderText: {
-    color: '#ef4444',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  draftBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  draftText: {
-    color: Colors.accent,
-    fontSize: 11,
-    fontWeight: '700',
-  },
+
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
@@ -1219,5 +1217,89 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 11,
     lineHeight: 16,
+  },
+
+  // Theme-Matching Discard & Remake Modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  modalIconBadge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalDesc: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+  modalActions: {
+    width: '100%',
+    gap: 10,
+  },
+  modalDiscardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#ef4444',
+    paddingVertical: 14,
+    borderRadius: 12,
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  modalDiscardText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalCancelBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.edge,
+  },
+  modalCancelText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
