@@ -131,6 +131,23 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
     } catch {}
   }
 
+  function handleRemakeVideo() {
+    Alert.alert(
+      isUrdu ? 'دوبارہ ویڈیو ریکارڈ کریں؟' : 'Remake Evidence Video?',
+      isUrdu
+        ? 'کیا آپ موجودہ ریکارڈنگ منسوخ کر کے لائیو کیمرے سے نئی ویڈیو بنانا چاہتے ہیں؟'
+        : 'Do you want to discard this clip and return to live camera capture to record fresh footage?',
+      [
+        { text: isUrdu ? 'منسوخ' : 'Cancel', style: 'cancel' },
+        {
+          text: isUrdu ? 'دوبارہ ریکارڈ کریں' : 'Discard & Remake',
+          style: 'destructive',
+          onPress: onBack,
+        },
+      ]
+    );
+  }
+
   async function handleSubmit() {
     setSubmitting(true);
     setError('');
@@ -179,8 +196,14 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           <Text style={styles.backText}>{isUrdu ? 'کیمرہ' : 'Back'}</Text>
         </TouchableOpacity>
 
-        <View style={styles.draftBadge}>
-          <Text style={styles.draftText}>{isUrdu ? 'ڈرافٹ' : 'DRAFT'}</Text>
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity style={styles.remakeHeaderBtn} onPress={handleRemakeVideo}>
+            <RotateCcw size={12} color="#ef4444" />
+            <Text style={styles.remakeHeaderText}>{isUrdu ? 'دوبارہ ریکارڈ' : 'Remake'}</Text>
+          </TouchableOpacity>
+          <View style={styles.draftBadge}>
+            <Text style={styles.draftText}>{isUrdu ? 'ڈرافٹ' : 'DRAFT'}</Text>
+          </View>
         </View>
       </View>
 
@@ -386,6 +409,14 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
             {submitting
               ? (isUrdu ? 'تجزیہ اور والٹ میں جمع ہو رہا ہے…' : 'Analyzing & Submitting to Private Vault…')
               : (isUrdu ? 'نجی والٹ میں جمع کرائیں' : 'Submit to Private Vault')}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Action 2: Remake / Retake Video */}
+        <TouchableOpacity style={styles.remakeFullBtn} onPress={handleRemakeVideo} disabled={submitting}>
+          <RotateCcw size={16} color={colors.ink} />
+          <Text style={[styles.remakeFullBtnText, { color: colors.ink }]}>
+            {isUrdu ? 'ویڈیو مسترد کریں اور دوبارہ ریکارڈ کریں' : 'Discard & Remake Video'}
           </Text>
         </TouchableOpacity>
 
