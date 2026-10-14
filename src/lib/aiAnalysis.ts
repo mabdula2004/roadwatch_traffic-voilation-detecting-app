@@ -223,12 +223,58 @@ export async function analyzeTrafficViolation(params: {
     };
   }
 
+/**
+ * Helper to execute an OpenRouter vision completion call
+ */
+async function callOpenRouterVision(
+  content: any[],
+  maxTokens: number = 450
+): Promise<{ ok: boolean; parsed?: any; is402?: boolean; error?: string }> {
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': 'https://roadwatch.app',
+        'X-OpenRouter-Title': 'RoadWatch Traffic AI',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [{ role: 'user', content }],
+        temperature: 0.1,
+        max_tokens: maxTokens,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return { ok: false, is402: response.status === 402, error: `HTTP ${response.status}: ${errText}` };
+    }
+
+    const data = await response.json();
+    const rawContent = data.choices?.[0]?.message?.content || '';
+    const cleaned = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    return { ok: true, parsed };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
   const cropNote = params.cropZoom && params.cropZoom > 1
     ? `\nNote: Framing zoom applied by citizen (${params.cropLabel || 'Focused'}, ${params.cropZoom}x magnification). Focus directly on target vehicle and violation in central frame.`
     : '';
 
-  const prompt = `You are RoadWatch AI (Qwen3-VL 8B) traffic enforcement vision auditor.
-Inspect the ${frames.length} provided video frame(s) extracted chronologically from a citizen's clip (Frame 1 to Frame ${frames.length}).${cropNote}
+  // --- STAGE 1: 1-FRAME SMART EARLY-EXIT SCAN ---
+  // We send ONLY the primary focal keyframe (55% duration point) to save prompt tokens.
+  // This guarantees that non-traffic videos (e.g. laptop screens, rooms, desk) or normal compliant traffic
+  // use ONLY ~400 tokens instead of wasting tokens on all 3 candidate frames!
+  const focalIndex = frames.length > 1 ? 1 : 0;
+  const primaryFrame = frames[focalIndex];
+
+  const stage1Prompt = `You are RoadWatch AI (Qwen3-VL 8B) traffic enforcement auditor.
+Review the provided central video keyframe extracted from a citizen's clip.${cropNote}
 
 RECOGNIZED VIOLATIONS:
 ${COMPACT_VIOLATION_TAXONOMY}
@@ -237,26 +283,19 @@ PRIMARY EVIDENTIARY RULES:
 1. NON-TRAFFIC OR NO VIOLATION:
    If the recording is NOT road traffic (e.g. laptop screen, indoor room, desk, wall, interior) OR if traffic is compliant:
    - "violation_detected": false
-   - "confirmed_frame_indices": []
    - "rejection_reason": "no_violation"
    - "plate_number": null
 
-2. CONFIRMING FRAMES ISOLATION:
+2. ACTIONABLE VIOLATION:
    If a vehicle commits an actionable traffic violation:
    - "violation_detected": true
    - "violation_type": "<code_from_taxonomy>"
-   - "confirmed_frame_indices": List ONLY the frame number(s) (1 to ${frames.length}) where the violation or violating vehicle's infraction/plate is actively and confirmly visible!
-     * If 1 frame confirms the violation: return [1] (or whichever frame)
-     * If 2 frames confirm the violation: return [1, 2] (or whichever 2 frames)
-     * If all 3 frames confirm the violation: return [1, 2, 3]
-     * Do NOT include frames that merely show empty road or background without the infraction.
    - "plate_number": exact sharp plate if 100% distinct, otherwise null with plate_status: "blurred". NEVER guess.
 
 Output ONLY valid JSON:
 {
   "violation_detected": boolean,
   "violation_type": string or null,
-  "confirmed_frame_indices": number[],
   "vehicle_distance": "optimal" | "too_far",
   "plate_status": "clear" | "blurred" | "missing",
   "plate_number": string or null,
@@ -266,82 +305,112 @@ Output ONLY valid JSON:
   "vehicle_color": string,
   "vehicle_type": string,
   "rejection_reason": "none" | "plate_blurred" | "vehicle_too_far" | "low_clarity" | "no_violation",
-  "reasoning": string,
-  "frame_descriptions": string[]
+  "reasoning": string
 }`;
 
-  // Pass each candidate frame with explicit timeline context to the vision model
-  const userContent: any[] = [{ type: 'text', text: prompt }];
-
-  for (let i = 0; i < frames.length; i++) {
-    const pct = i === 0 ? '30%' : i === 1 ? '55%' : '80%';
-    userContent.push({
-      type: 'text',
-      text: `--- FRAME ${i + 1} of ${frames.length} (${pct} of video timeline) ---`,
-    });
-    userContent.push({
-      type: 'image_url',
-      image_url: { url: `data:image/jpeg;base64,${frames[i]}` },
-    });
-  }
+  const stage1Content: any[] = [
+    { type: 'text', text: stage1Prompt },
+    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${primaryFrame}` } },
+  ];
 
   let isCreditLimitError = false;
+  let stage1Result = await callOpenRouterVision(stage1Content);
 
-  const MAX_ATTEMPTS = 2;
+  // Quick retry once if network glitch
+  if (!stage1Result.ok && !stage1Result.is402) {
+    await new Promise(r => setTimeout(r, 800));
+    stage1Result = await callOpenRouterVision(stage1Content);
+  }
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    try {
-      const modelToUse = AI_MODEL;
-      let effectiveContent = userContent;
-      // On retry if needed, use primary focal moment frame to guarantee quick turnaround
-      if (attempt > 0 && frames.length > 1) {
-        effectiveContent = [
-          { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[1]}` } },
-        ];
-      }
+  if (stage1Result.is402) {
+    isCreditLimitError = true;
+  }
 
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://roadwatch.app',
-          'X-OpenRouter-Title': 'RoadWatch Traffic AI',
-          'Content-Type': 'application/json',
+  if (stage1Result.ok && stage1Result.parsed) {
+    const s1 = stage1Result.parsed;
+    const isVioSuspected = Boolean(s1.violation_detected) && s1.rejection_reason !== 'no_violation';
+
+    // --- SMART EARLY EXIT ---
+    // If NO violation in this central frame (laptop screen, room, or lawful compliant traffic):
+    // STOP IMMEDIATELY! Do NOT send any more frames or waste any more tokens.
+    if (!isVioSuspected) {
+      return formatResult(
+        caseId,
+        {
+          ...s1,
+          confirmed_frame_indices: [],
+          frame_descriptions: [],
         },
-        body: JSON.stringify({
-          model: modelToUse,
-          messages: [{ role: 'user', content: effectiveContent }],
-          temperature: 0.1,
-          max_tokens: 450,
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        if (response.status === 402) {
-          isCreditLimitError = true;
-        }
-        if (attempt < MAX_ATTEMPTS - 1) {
-          await new Promise(res => setTimeout(res, 800));
-          continue;
-        }
-        throw new Error(`OpenRouter HTTP ${response.status}: ${errText}`);
-      }
-
-      const data = await response.json();
-      const rawContent = data.choices?.[0]?.message?.content || '';
-      const cleaned = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-
-      return formatResult(caseId, parsed, params.claimedClass, locationName, frames);
-    } catch (err: any) {
-      if (attempt < MAX_ATTEMPTS - 1) {
-        await new Promise(res => setTimeout(res, 800));
-        continue;
-      }
-      console.log('Qwen AI API notice:', err);
+        params.claimedClass,
+        locationName,
+        []
+      );
     }
+
+    // --- STAGE 2: CONFIRMATION & EVIDENTIARY ISOLATION (Only for confirmed violations) ---
+    // If only 1 frame was provided, return confirmed 1 frame:
+    if (frames.length === 1) {
+      return formatResult(
+        caseId,
+        {
+          ...s1,
+          confirmed_frame_indices: [1],
+          frame_descriptions: [`Frame 1: ⚡ VIOLATION CONFIRMED - ${s1.violation_type || 'Actionable Infraction'}`],
+        },
+        params.claimedClass,
+        locationName,
+        [primaryFrame]
+      );
+    }
+
+    // If multiple candidate frames exist, corroborate violation and plate sharpness:
+    let confirmedIndices: number[] = [focalIndex + 1];
+    let finalPlateNumber = s1.plate_number;
+    let finalPlateStatus = s1.plate_status;
+    let finalReasoning = s1.reasoning;
+
+    // If plate was blurred or not yet distinct, inspect exit tracking frame (80% duration) for clear plate:
+    if ((s1.plate_status !== 'clear' || !s1.plate_number) && frames.length > 2) {
+      const exitFrame = frames[2];
+      const platePrompt = `You are RoadWatch AI plate inspection specialist.
+Review this close-up exit frame for the violating vehicle (${s1.vehicle_color || ''} ${s1.vehicle_type || 'vehicle'}).
+Can you clearly read the vehicle license plate?
+Output ONLY JSON:
+{
+  "plate_status": "clear" | "blurred" | "missing",
+  "plate_number": string or null,
+  "plate_confidence": number,
+  "confirms_violation": boolean
+}`;
+      const stage2Result = await callOpenRouterVision([
+        { type: 'text', text: platePrompt },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${exitFrame}` } },
+      ]);
+
+      if (stage2Result.ok && stage2Result.parsed) {
+        if (stage2Result.parsed.plate_number && stage2Result.parsed.plate_status === 'clear') {
+          finalPlateNumber = stage2Result.parsed.plate_number;
+          finalPlateStatus = 'clear';
+        }
+        if (stage2Result.parsed.confirms_violation) {
+          confirmedIndices.push(3);
+        }
+      }
+    }
+
+    return formatResult(
+      caseId,
+      {
+        ...s1,
+        plate_number: finalPlateNumber,
+        plate_status: finalPlateStatus,
+        confirmed_frame_indices: confirmedIndices,
+        reasoning: finalReasoning,
+      },
+      params.claimedClass,
+      locationName,
+      frames
+    );
   }
 
   // If credit limit or rate limited, inform the user honestly
