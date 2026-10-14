@@ -42,6 +42,25 @@ export interface StoredCaseReport {
   officerVerdictAt?: string;
   officerNote?: string;
   frameUris?: string[];
+  // Citizen Manual Corrections / Overrides
+  citizenPlate?: string;
+  citizenVehicleMakeModel?: string;
+  citizenVehicleColor?: string;
+  citizenVehicleType?: string;
+  citizenViolationType?: string;
+  citizenViolationName?: string;
+  citizenNote?: string;
+  isCitizenEdited?: boolean;
+}
+
+export interface CitizenEvidenceDetails {
+  plateNumber?: string;
+  vehicleMakeModel?: string;
+  vehicleColor?: string;
+  vehicleType?: string;
+  violationType?: string;
+  violationName?: string;
+  citizenNote?: string;
 }
 
 export interface PenaltyCitation {
@@ -455,7 +474,11 @@ export async function updateReportStatus(
   reportIdentifier: string,
   status: string,
   clientCaptureId?: string,
-  extra?: { frameUris?: string[]; aiResult?: AiEvidentiaryResult }
+  extra?: {
+    frameUris?: string[];
+    aiResult?: AiEvidentiaryResult;
+    citizenDetails?: CitizenEvidenceDetails;
+  }
 ): Promise<void> {
   const normalizedStatus = (status === 'pending_manual_review' || status === 'under_review') ? 'under_review' : status;
   try {
@@ -483,13 +506,36 @@ export async function updateReportStatus(
         if (item.penaltyPkr && !item.penaltyRefunded && normalizedStatus === 'under_review') {
           penaltyToRefund = item.penaltyPkr;
         }
-        const effectiveAi = extra?.aiResult || item.aiResult;
+        let effectiveAi = extra?.aiResult || item.aiResult;
         const effectiveFrames = (extra?.frameUris && extra.frameUris.length > 0) ? extra.frameUris : item.frameUris;
+
+        if (extra?.citizenDetails && effectiveAi) {
+          effectiveAi = {
+            ...effectiveAi,
+            citizenPlate: extra.citizenDetails.plateNumber ?? effectiveAi.citizenPlate,
+            citizenVehicleMakeModel: extra.citizenDetails.vehicleMakeModel ?? effectiveAi.citizenVehicleMakeModel,
+            citizenVehicleColor: extra.citizenDetails.vehicleColor ?? effectiveAi.citizenVehicleColor,
+            citizenVehicleType: extra.citizenDetails.vehicleType ?? effectiveAi.citizenVehicleType,
+            citizenViolationType: extra.citizenDetails.violationType ?? effectiveAi.citizenViolationType,
+            citizenViolationName: extra.citizenDetails.violationName ?? effectiveAi.citizenViolationName,
+            citizenNote: extra.citizenDetails.citizenNote ?? effectiveAi.citizenNote,
+            isCitizenEdited: true,
+          };
+        }
+
         return {
           ...sanitizeReportForStorage(item),
           status: normalizedStatus,
           penaltyRefunded: penaltyToRefund > 0 ? true : item.penaltyRefunded,
           frameUris: effectiveFrames,
+          citizenPlate: extra?.citizenDetails?.plateNumber ?? item.citizenPlate,
+          citizenVehicleMakeModel: extra?.citizenDetails?.vehicleMakeModel ?? item.citizenVehicleMakeModel,
+          citizenVehicleColor: extra?.citizenDetails?.vehicleColor ?? item.citizenVehicleColor,
+          citizenVehicleType: extra?.citizenDetails?.vehicleType ?? item.citizenVehicleType,
+          citizenViolationType: extra?.citizenDetails?.violationType ?? item.citizenViolationType,
+          citizenViolationName: extra?.citizenDetails?.violationName ?? item.citizenViolationName,
+          citizenNote: extra?.citizenDetails?.citizenNote ?? item.citizenNote,
+          isCitizenEdited: extra?.citizenDetails ? true : item.isCitizenEdited,
           aiResult: effectiveAi ? {
             ...sanitizeReportForStorage({ ...item, aiResult: effectiveAi }).aiResult!,
             status: normalizedStatus as any,
@@ -530,6 +576,67 @@ export async function updateReportStatus(
     }
   } catch (e) {
     console.log('Remote status update note:', e);
+  }
+}
+
+/**
+ * Updates or attaches citizen manual evidence details (overridden plate, vehicle details, note)
+ * to a local and remote report.
+ */
+export async function updateReportCitizenDetails(
+  reportIdentifier: string,
+  details: CitizenEvidenceDetails,
+  clientCaptureId?: string
+): Promise<void> {
+  try {
+    let list: StoredCaseReport[] = [];
+    try {
+      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      if (raw) list = JSON.parse(raw);
+    } catch (e) {
+      console.warn('Failed reading local vault in updateReportCitizenDetails:', e);
+      list = [];
+    }
+
+    const updated = list.map(item => {
+      const isTarget =
+        item.reportId === reportIdentifier ||
+        item.clientCaptureId === reportIdentifier ||
+        item.aiResult?.caseId === reportIdentifier ||
+        (clientCaptureId && (item.clientCaptureId === clientCaptureId || item.reportId === clientCaptureId));
+
+      if (isTarget) {
+        const updatedAi = item.aiResult ? {
+          ...item.aiResult,
+          citizenPlate: details.plateNumber !== undefined ? details.plateNumber : item.aiResult.citizenPlate,
+          citizenVehicleMakeModel: details.vehicleMakeModel !== undefined ? details.vehicleMakeModel : item.aiResult.citizenVehicleMakeModel,
+          citizenVehicleColor: details.vehicleColor !== undefined ? details.vehicleColor : item.aiResult.citizenVehicleColor,
+          citizenVehicleType: details.vehicleType !== undefined ? details.vehicleType : item.aiResult.citizenVehicleType,
+          citizenViolationType: details.violationType !== undefined ? details.violationType : item.aiResult.citizenViolationType,
+          citizenViolationName: details.violationName !== undefined ? details.violationName : item.aiResult.citizenViolationName,
+          citizenNote: details.citizenNote !== undefined ? details.citizenNote : item.aiResult.citizenNote,
+          isCitizenEdited: true,
+        } : undefined;
+
+        return sanitizeReportForStorage({
+          ...item,
+          citizenPlate: details.plateNumber !== undefined ? details.plateNumber : item.citizenPlate,
+          citizenVehicleMakeModel: details.vehicleMakeModel !== undefined ? details.vehicleMakeModel : item.citizenVehicleMakeModel,
+          citizenVehicleColor: details.vehicleColor !== undefined ? details.vehicleColor : item.citizenVehicleColor,
+          citizenVehicleType: details.vehicleType !== undefined ? details.vehicleType : item.citizenVehicleType,
+          citizenViolationType: details.violationType !== undefined ? details.violationType : item.citizenViolationType,
+          citizenViolationName: details.violationName !== undefined ? details.violationName : item.citizenViolationName,
+          citizenNote: details.citizenNote !== undefined ? details.citizenNote : item.citizenNote,
+          isCitizenEdited: true,
+          aiResult: updatedAi,
+        });
+      }
+      return sanitizeReportForStorage(item);
+    });
+
+    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+  } catch (err) {
+    console.error('Failed to save citizen details to local vault:', err);
   }
 }
 

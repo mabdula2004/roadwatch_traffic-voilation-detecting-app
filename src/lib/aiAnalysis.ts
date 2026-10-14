@@ -40,6 +40,15 @@ export interface AiEvidentiaryResult {
   isRateLimited?: boolean;
   violationFrameIndex?: number; // 1, 2, or 3 (typically Frame 2)
   frameDescriptions?: string[]; // Explanatory breakdown of why each frame proves or monitors the violation
+  // Citizen Manual Corrections / Overrides
+  citizenPlate?: string;
+  citizenVehicleMakeModel?: string;
+  citizenVehicleColor?: string;
+  citizenVehicleType?: string;
+  citizenViolationType?: string;
+  citizenViolationName?: string;
+  citizenNote?: string;
+  isCitizenEdited?: boolean;
 }
 
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';

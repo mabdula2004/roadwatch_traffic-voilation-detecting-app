@@ -88,6 +88,14 @@ type ReportRow = {
   vehicle_model?: string;
   vehicle_color?: string;
   client_capture_id?: string;
+  citizen_plate?: string;
+  citizen_vehicle_model?: string;
+  citizen_vehicle_color?: string;
+  citizen_vehicle_type?: string;
+  citizen_violation_type?: string;
+  citizen_violation_name?: string;
+  citizen_note?: string;
+  is_citizen_edited?: boolean;
 };
 
 export function Vault() {
@@ -149,6 +157,14 @@ export function Vault() {
             vehicle_model: item.aiResult?.vehicleMakeModel,
             vehicle_color: item.aiResult?.vehicleColor,
             client_capture_id: item.clientCaptureId,
+            citizen_plate: item.citizenPlate || item.aiResult?.citizenPlate,
+            citizen_vehicle_model: item.citizenVehicleMakeModel || item.aiResult?.citizenVehicleMakeModel,
+            citizen_vehicle_color: item.citizenVehicleColor || item.aiResult?.citizenVehicleColor,
+            citizen_vehicle_type: item.citizenVehicleType || item.aiResult?.citizenVehicleType,
+            citizen_violation_type: item.citizenViolationType || item.aiResult?.citizenViolationType,
+            citizen_violation_name: item.citizenViolationName || item.aiResult?.citizenViolationName,
+            citizen_note: item.citizenNote || item.aiResult?.citizenNote,
+            is_citizen_edited: item.isCitizenEdited || item.aiResult?.isCitizenEdited,
           };
         })
       );
@@ -1121,12 +1137,27 @@ export function Vault() {
                       <Car size={16} color={colors.telemetry} />
                       <Text style={[styles.telemetryKey, { color: colors.muted }]}>License Plate:</Text>
                     </View>
-                    <View style={styles.licensePlateContainer}>
-                      <View style={styles.pakistanPlateBadge}>
-                        <Text style={styles.pakistanPlateText}>
-                          {selectedReport.plate_number || selectedReport.ai_result?.plateNumber || 'LEA-4471'}
-                        </Text>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <View style={styles.licensePlateContainer}>
+                        <View style={styles.pakistanPlateBadge}>
+                          <Text style={[styles.pakistanPlateText, { letterSpacing: 1.5 }]}>
+                            {(selectedReport.citizen_plate || selectedReport.plate_number || selectedReport.ai_result?.plateNumber || 'LEA-4471').toUpperCase()}
+                          </Text>
+                        </View>
                       </View>
+                      {selectedReport.citizen_plate ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                          <CheckCircle2 size={11} color="#10b981" />
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>
+                            {isUrdu ? 'شہری کی تصدیق شدہ' : 'Citizen Specified'}
+                          </Text>
+                          {selectedReport.plate_number && selectedReport.plate_number !== selectedReport.citizen_plate && (
+                            <Text style={{ fontSize: 9, color: colors.muted }}>
+                              (AI: {selectedReport.plate_number})
+                            </Text>
+                          )}
+                        </View>
+                      ) : null}
                     </View>
                   </View>
 
@@ -1134,12 +1165,19 @@ export function Vault() {
                   <View style={[styles.telemetryRow, { borderTopWidth: 1, borderTopColor: colors.edge }]}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <Eye size={16} color={colors.telemetry} />
-                      <Text style={[styles.telemetryKey, { color: colors.muted }]}>Vehicle Model:</Text>
+                      <Text style={[styles.telemetryKey, { color: colors.muted }]}>Vehicle Info:</Text>
                     </View>
-                    <Text style={[styles.telemetryVal, { color: colors.ink }]}>
-                      {selectedReport.vehicle_model || selectedReport.ai_result?.vehicleMakeModel || 'Corolla GLi'}{' '}
-                      ({selectedReport.vehicle_color || selectedReport.ai_result?.vehicleColor || 'White'})
-                    </Text>
+                    <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.telemetryVal, { color: colors.ink, fontWeight: '700', textAlign: 'right' }]}>
+                        {selectedReport.citizen_vehicle_model || selectedReport.vehicle_model || selectedReport.ai_result?.vehicleMakeModel || 'Corolla GLi'}{' '}
+                        ({selectedReport.citizen_vehicle_color || selectedReport.vehicle_color || selectedReport.ai_result?.vehicleColor || 'White'})
+                      </Text>
+                      {selectedReport.is_citizen_edited || selectedReport.citizen_vehicle_type ? (
+                        <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '600', marginTop: 2 }}>
+                          {selectedReport.citizen_vehicle_type || 'Vehicle'} · {isUrdu ? 'شہری کی فراہم کردہ' : 'Citizen Specified'}
+                        </Text>
+                      ) : null}
+                    </View>
                   </View>
 
                   {/* Infraction Category */}
@@ -1148,13 +1186,39 @@ export function Vault() {
                       <AlertTriangle size={16} color={colors.signal} />
                       <Text style={[styles.telemetryKey, { color: colors.muted }]}>Violation Class:</Text>
                     </View>
-                    <Text style={[styles.telemetryVal, { color: colors.signal, fontWeight: '700' }]}>
-                      {selectedReport.ai_result?.violationName ||
-                        (selectedReport.claimed_class === 'auto_ai_detect' || selectedReport.claimed_class?.toLowerCase().includes('auto_ai')
-                          ? (isUrdu ? 'نتیجہ' : 'Result')
-                          : selectedReport.claimed_class.replace(/_/g, ' ').toUpperCase())}
-                    </Text>
+                    <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.telemetryVal, { color: colors.signal, fontWeight: '700', textAlign: 'right' }]}>
+                        {selectedReport.citizen_violation_name ||
+                          selectedReport.citizen_violation_type?.replace(/_/g, ' ').toUpperCase() ||
+                          selectedReport.ai_result?.violationName ||
+                          (selectedReport.claimed_class === 'auto_ai_detect' || selectedReport.claimed_class?.toLowerCase().includes('auto_ai')
+                            ? (isUrdu ? 'نتیجہ' : 'Result')
+                            : selectedReport.claimed_class.replace(/_/g, ' ').toUpperCase())}
+                      </Text>
+                      {selectedReport.citizen_violation_type ? (
+                        <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '600', marginTop: 2 }}>
+                          {isUrdu ? 'شہری کی دعویٰ کردہ' : 'Citizen Claim'}
+                        </Text>
+                      ) : null}
+                    </View>
                   </View>
+
+                  {/* Citizen Note for Warden Audit */}
+                  {selectedReport.citizen_note ? (
+                    <View style={[styles.telemetryRow, { borderTopWidth: 1, borderTopColor: colors.edge, flexDirection: 'column', alignItems: 'flex-start', gap: 6 }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <FileText size={15} color={colors.telemetry} />
+                        <Text style={[styles.telemetryKey, { color: colors.muted }]}>
+                          {isUrdu ? 'شہری کا نوٹ برائے وارڈن آڈٹ:' : 'Citizen Note for Warden Audit:'}
+                        </Text>
+                      </View>
+                      <View style={{ width: '100%', padding: 10, backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)' }}>
+                        <Text style={{ fontSize: 12, color: colors.ink, fontStyle: 'italic', lineHeight: 16 }}>
+                          "{selectedReport.citizen_note}"
+                        </Text>
+                      </View>
+                    </View>
+                  ) : null}
 
                   {/* GPS & Location */}
                   <View style={[styles.telemetryRow, { borderTopWidth: 1, borderTopColor: colors.edge }]}>

@@ -170,6 +170,22 @@ export const translations = {
     reportsDeletedSuccess: 'Selected reports removed from vault.',
     deleteDossierBtn: 'Delete Report from Vault',
 
+    // Manual Citizen Evidence Details
+    editDetailsManually: 'Edit Details Manually',
+    citizenDetailsTitle: 'Manual Evidence Details',
+    citizenDetailsSubtitle: 'Provide vehicle and violation details for officer audit if AI was unable to detect them clearly.',
+    licensePlateLabel: 'License Plate Number',
+    licensePlatePlaceholder: 'e.g. LEA-1234, ICT-982',
+    vehicleColorLabel: 'Vehicle Color',
+    vehicleModelLabel: 'Make & Model',
+    vehicleTypeLabel: 'Vehicle Type',
+    violationCategoryLabel: 'Violation Type',
+    citizenNoteLabel: 'Citizen Audit Note for Warden',
+    citizenNotePlaceholder: 'Explain what happened or which frame shows the violation/plate...',
+    saveDetailsBtn: 'Save & Attach Details',
+    citizenProvidedBadge: 'Citizen Specified',
+    citizenAttachedNotice: 'Citizen-provided details will be forwarded to the warden with video evidence.',
+
     // Safety & SOS
     safetyAndPrivacy: 'Safety & Privacy',
     safetySub: 'Emergency help and what RoadWatch shares about you.',
@@ -387,6 +403,22 @@ export const translations = {
     protectedPendingUpload: 'ڈیلیٹ نہیں کر سکتے: اپلوڈ کے منتظر ہے',
     reportsDeletedSuccess: 'منتخب رپورٹس والٹ سے ختم کر دی گئیں۔',
     deleteDossierBtn: 'رپورٹ والٹ سے ڈیلیٹ کریں',
+
+    // Manual Citizen Evidence Details
+    editDetailsManually: 'دستی تفصیلات درج کریں / درست کریں',
+    citizenDetailsTitle: 'شواہد کی دستی تفصیلات',
+    citizenDetailsSubtitle: 'اگر اے آئی واضح شناخت نہ کر سکا ہو تو وارڈن آڈٹ کے لیے نمبر پلیٹ اور گاڑی کی تفصیلات درج کریں۔',
+    licensePlateLabel: 'گاڑی کا رجسٹریشن نمبر (نمبر پلیٹ)',
+    licensePlatePlaceholder: 'مثلاً LEA-1234, ICT-982',
+    vehicleColorLabel: 'گاڑی کا رنگ',
+    vehicleModelLabel: 'ماڈل و کمپنی',
+    vehicleTypeLabel: 'گاڑی کی قسم',
+    violationCategoryLabel: 'خلاف ورزی کی قسم',
+    citizenNoteLabel: 'ٹریفک وارڈن کے لیے نوٹ / وضاحت',
+    citizenNotePlaceholder: 'وضاحت لکھیں کہ کیا خلاف ورزی ہوئی یا کس فریم میں پلیٹ صاف نظر آ رہی ہے...',
+    saveDetailsBtn: 'محفوظ کریں اور کیس سے منسلک کریں',
+    citizenProvidedBadge: 'شہری کی درج کردہ',
+    citizenAttachedNotice: 'شہری کی فراہم کردہ یہ تفصیلات ویڈیو شواہد کے ساتھ وارڈن ریویو میں جائیں گی۔',
 
     // Safety & SOS
     safetyAndPrivacy: 'حفاظت اور رازداری',
