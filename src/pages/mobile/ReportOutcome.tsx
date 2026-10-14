@@ -289,8 +289,11 @@ export function ReportOutcome({
     }
   };
 
-  // Frames to show (either from aiResult or clip)
-  const frames = aiResult.framesBase64 || clip.framesBase64 || [];
+  // Frames to show: ONLY confirmed frames from aiResult when violation is detected (1, 2, or 3 frames), or none if no violation
+  const frames = (aiResult.violationDetected && aiResult.framesBase64 && aiResult.framesBase64.length > 0)
+    ? aiResult.framesBase64
+    : [];
+
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.canvas }]}>
@@ -413,23 +416,23 @@ export function ReportOutcome({
           <View style={{ marginTop: 18 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <Text style={[styles.sectionHeading, { color: colors.muted, marginBottom: 0 }]}>
-                ANALYZED VIDEO FRAMES ({frames.length} FRAMES INSPECTED)
+                {frames.length === 1
+                  ? (isUrdu ? 'خلاف ورزی کا تصدیقی ثبوت (1 کلیدی فریم)' : 'CONFIRMED VIOLATION EVIDENCE (1 KEYFRAME)')
+                  : isUrdu
+                  ? `خلاف ورزی کے تصدیقی ثبوت (${frames.length} کلیدی فریمز)`
+                  : `CONFIRMED VIOLATION EVIDENCE (${frames.length} KEYFRAMES)`}
               </Text>
               <Text style={{ fontSize: 11, color: colors.telemetry, fontWeight: '600' }}>
-                Tap to inspect
+                {isUrdu ? 'بڑا دیکھنے کے لیے ٹیپ کریں' : 'Tap to inspect'}
               </Text>
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.framesScrollContainer}>
               {frames.map((frameB64, idx) => {
-                const isVioMoment = aiResult.violationDetected && idx === ((aiResult.violationFrameIndex ?? 2) - 1);
-                const timePct = idx === 0 ? 30 : idx === 1 ? 55 : 80;
+                const isVioMoment = true;
+                const timePct = frames.length === 1 ? 50 : idx === 0 ? 35 : idx === 1 ? 65 : 85;
                 const customDesc = aiResult.frameDescriptions?.[idx];
-                const phaseLabel = isVioMoment
-                  ? (isUrdu ? '⚡ خلاف ورزی کا لمحہ' : '⚡ VIOLATION MOMENT')
-                  : idx === 0
-                  ? (isUrdu ? 'اپروچ اور پوزیشن' : 'Approach')
-                  : (isUrdu ? 'پلیٹ و حتمی ثبوت' : 'Plate Track');
+                const phaseLabel = isUrdu ? '⚡ خلاف ورزی کی تصدیق' : '⚡ VIOLATION CONFIRMED';
 
                 return (
                   <TouchableOpacity
@@ -438,8 +441,8 @@ export function ReportOutcome({
                       styles.frameCard,
                       {
                         backgroundColor: colors.surface,
-                        borderColor: isVioMoment ? '#ef4444' : colors.edge,
-                        borderWidth: isVioMoment ? 2 : 1,
+                        borderColor: '#ef4444',
+                        borderWidth: 2,
                       },
                     ]}
                     activeOpacity={0.85}
@@ -454,11 +457,11 @@ export function ReportOutcome({
                       <View
                         style={[
                           styles.frameIndexPill,
-                          isVioMoment && { backgroundColor: '#ef4444' },
+                          { backgroundColor: '#ef4444' },
                         ]}
                       >
                         <Text style={styles.frameIndexText}>
-                          {isVioMoment ? '⚡ Frame ' + (idx + 1) + ' · VIOLATION' : 'Frame ' + (idx + 1)}
+                          {isUrdu ? `⚡ فریم ${idx + 1} · تصدیق شدہ ثبوت` : `⚡ Frame ${idx + 1} · EVIDENCE`}
                         </Text>
                       </View>
                       <View style={styles.frameZoomBtn}>
@@ -474,7 +477,7 @@ export function ReportOutcome({
                         style={{
                           fontSize: 10,
                           fontWeight: '700',
-                          color: isVioMoment ? '#ef4444' : colors.ink,
+                          color: '#ef4444',
                           marginTop: 2,
                         }}
                         numberOfLines={1}
@@ -796,10 +799,8 @@ export function ReportOutcome({
       <Modal visible={selectedZoomIndex !== null} transparent animationType="fade" onRequestClose={() => setSelectedZoomIndex(null)}>
         {(() => {
           const activeIdx = selectedZoomIndex ?? 0;
-          const isVio =
-            aiResult.violationDetected &&
-            activeIdx === ((aiResult.violationFrameIndex ?? 2) - 1);
-          const tPct = activeIdx === 0 ? 30 : activeIdx === 1 ? 55 : 80;
+          const isVio = aiResult.violationDetected;
+          const tPct = frames.length === 1 ? 50 : activeIdx === 0 ? 35 : activeIdx === 1 ? 65 : 85;
           const customDesc = aiResult.frameDescriptions?.[activeIdx];
 
           return (
@@ -812,19 +813,19 @@ export function ReportOutcome({
                       <View
                         style={[
                           styles.lightboxFrameBadge,
-                          isVio && { backgroundColor: '#ef4444' },
+                          { backgroundColor: '#ef4444' },
                         ]}
                       >
                         <Text style={styles.lightboxFrameBadgeText}>
-                          {isVio
-                            ? `⚡ Frame ${activeIdx + 1} of ${frames.length} · VIOLATION`
-                            : `Frame ${activeIdx + 1} of ${frames.length}`}
+                          {isUrdu
+                            ? `⚡ فریم ${activeIdx + 1} از ${frames.length} · ثبوت`
+                            : `⚡ Frame ${activeIdx + 1} of ${frames.length} · VIOLATION`}
                         </Text>
                       </View>
                       <Text style={styles.lightboxTimelineText}>{tPct}% timeline</Text>
                     </View>
                     <Text style={styles.lightboxSub} numberOfLines={1}>
-                      {customDesc || (isVio ? 'Decisive evidence moment' : 'Traffic alignment frame')}
+                      {customDesc || (isUrdu ? 'خلاف ورزی کا تصدیقی ثبوت' : 'Decisive violation evidence keyframe')}
                     </Text>
                   </View>
                   <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedZoomIndex(null)} activeOpacity={0.7}>

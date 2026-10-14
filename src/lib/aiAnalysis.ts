@@ -227,21 +227,36 @@ export async function analyzeTrafficViolation(params: {
     ? `\nNote: Framing zoom applied by citizen (${params.cropLabel || 'Focused'}, ${params.cropZoom}x magnification). Focus directly on target vehicle and violation in central frame.`
     : '';
 
-  const prompt = `You are RoadWatch AI (Qwen2.5-VL 72B) traffic enforcement auditor.
-Review the provided video frame for actionable traffic violations.${cropNote}
+  const prompt = `You are RoadWatch AI (Qwen3-VL 8B) traffic enforcement vision auditor.
+Inspect the ${frames.length} provided video frame(s) extracted chronologically from a citizen's clip (Frame 1 to Frame ${frames.length}).${cropNote}
 
 RECOGNIZED VIOLATIONS:
 ${COMPACT_VIOLATION_TAXONOMY}
 
-STRICT EVIDENTIARY CONSTRAINTS:
-1. DETECT: Identify if any vehicle commits a listed violation. If none, set "violation_detected": false, "rejection_reason": "no_violation".
-2. ZERO-GUESSING PLATE: Extract "plate_number" ONLY if 100% sharp and vehicle violated traffic law. If distant, motion-blurred or shadowed, set "plate_number": null, "plate_status": "blurred", "rejection_reason": "plate_blurred". NEVER extrapolate digits.
-3. ISOLATE: Target and extract attributes (make/model/color) exclusively for the violating vehicle. Ignore compliant traffic.
+PRIMARY EVIDENTIARY RULES:
+1. NON-TRAFFIC OR NO VIOLATION:
+   If the recording is NOT road traffic (e.g. laptop screen, indoor room, desk, wall, interior) OR if traffic is compliant:
+   - "violation_detected": false
+   - "confirmed_frame_indices": []
+   - "rejection_reason": "no_violation"
+   - "plate_number": null
+
+2. CONFIRMING FRAMES ISOLATION:
+   If a vehicle commits an actionable traffic violation:
+   - "violation_detected": true
+   - "violation_type": "<code_from_taxonomy>"
+   - "confirmed_frame_indices": List ONLY the frame number(s) (1 to ${frames.length}) where the violation or violating vehicle's infraction/plate is actively and confirmly visible!
+     * If 1 frame confirms the violation: return [1] (or whichever frame)
+     * If 2 frames confirm the violation: return [1, 2] (or whichever 2 frames)
+     * If all 3 frames confirm the violation: return [1, 2, 3]
+     * Do NOT include frames that merely show empty road or background without the infraction.
+   - "plate_number": exact sharp plate if 100% distinct, otherwise null with plate_status: "blurred". NEVER guess.
 
 Output ONLY valid JSON:
 {
   "violation_detected": boolean,
   "violation_type": string or null,
+  "confirmed_frame_indices": number[],
   "vehicle_distance": "optimal" | "too_far",
   "plate_status": "clear" | "blurred" | "missing",
   "plate_number": string or null,
@@ -251,15 +266,24 @@ Output ONLY valid JSON:
   "vehicle_color": string,
   "vehicle_type": string,
   "rejection_reason": "none" | "plate_blurred" | "vehicle_too_far" | "low_clarity" | "no_violation",
-  "reasoning": string
+  "reasoning": string,
+  "frame_descriptions": string[]
 }`;
 
-  // Primary decisive violation keyframe (~55% focal duration point)
-  const primaryFrame = frames.length > 1 ? frames[1] : frames[0];
-  const userContent: any[] = [
-    { type: 'text', text: prompt },
-    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${primaryFrame}` } },
-  ];
+  // Pass each candidate frame with explicit timeline context to the vision model
+  const userContent: any[] = [{ type: 'text', text: prompt }];
+
+  for (let i = 0; i < frames.length; i++) {
+    const pct = i === 0 ? '30%' : i === 1 ? '55%' : '80%';
+    userContent.push({
+      type: 'text',
+      text: `--- FRAME ${i + 1} of ${frames.length} (${pct} of video timeline) ---`,
+    });
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: `data:image/jpeg;base64,${frames[i]}` },
+    });
+  }
 
   let isCreditLimitError = false;
 
@@ -269,10 +293,11 @@ Output ONLY valid JSON:
     try {
       const modelToUse = AI_MODEL;
       let effectiveContent = userContent;
-      if (attempt > 0 && frames.length > 0) {
+      // On retry if needed, use primary focal moment frame to guarantee quick turnaround
+      if (attempt > 0 && frames.length > 1) {
         effectiveContent = [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[0]}` } },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frames[1]}` } },
         ];
       }
 
@@ -496,23 +521,47 @@ function formatResult(
     : (status === 'fined' ? 2 : 1);
 
   // Proving evidentiary frame(s):
-  // Preserve and display ALL inspected keyframes so user/officer can slide sideways!
+  // Preserve and display ONLY the frames in which violation is confirmly detected!
+  // - 0 confirmed frames (or laptop / room / no violation) -> 0 frames!
+  // - 1 frame confirms violation -> 1 frame!
+  // - 2 frames confirm violation -> 2 frames!
+  // - 3 frames confirm violation -> 3 frames!
   const safeFrames = framesBase64 || [];
-  const decisiveFrames = safeFrames.slice(0, 3);
+  const decisiveFrames: string[] = [];
+  const frameDescriptions: string[] = [];
 
-  let frameDescriptions: string[] = [];
   if (status === 'fined') {
-    frameDescriptions = [
-      'Frame 1: Approach & initial road positioning',
-      `Frame 2: ⚡ DECISIVE EVIDENCE: ${violationMeta?.name || 'Violation Confirmed'}`,
-      'Frame 3: Plate tracking & vehicle exit',
-    ];
-  } else {
-    frameDescriptions = [
-      'Frame 1: Initial road tracking',
-      'Frame 2: Inspected position (Lawful)',
-      'Frame 3: Normal traffic movement',
-    ];
+    let confirmedIndices: number[] = [];
+    if (Array.isArray(parsed.confirmed_frame_indices)) {
+      confirmedIndices = parsed.confirmed_frame_indices
+        .map(Number)
+        .filter((n: number) => !isNaN(n) && n >= 1 && n <= safeFrames.length);
+    } else if (parsed.violation_frame_index) {
+      const idx = Number(parsed.violation_frame_index);
+      if (idx >= 1 && idx <= safeFrames.length) {
+        confirmedIndices = [idx];
+      }
+    }
+
+    // Fallback if violation confirmed but model didn't specify indices: default to 1 focal frame (Frame 2 or Frame 1)
+    if (confirmedIndices.length === 0 && safeFrames.length > 0) {
+      confirmedIndices = [safeFrames.length > 1 ? 2 : 1];
+    }
+
+    for (const idx of confirmedIndices) {
+      const f = safeFrames[idx - 1];
+      if (f && !decisiveFrames.includes(f)) {
+        decisiveFrames.push(f);
+      }
+    }
+
+    if (Array.isArray(parsed.frame_descriptions) && parsed.frame_descriptions.length === decisiveFrames.length) {
+      frameDescriptions.push(...parsed.frame_descriptions.map(String));
+    } else {
+      decisiveFrames.forEach((_, i) => {
+        frameDescriptions.push(`Frame ${i + 1}: ⚡ VIOLATION CONFIRMED - ${violationMeta?.name || 'Evidence Keyframe'}`);
+      });
+    }
   }
 
   return {
@@ -543,7 +592,7 @@ function formatResult(
     analyzedAt: new Date().toISOString(),
     locationName,
     framesBase64: decisiveFrames,
-    violationFrameIndex: violationFrameIndex,
+    violationFrameIndex: decisiveFrames.length > 0 ? 1 : undefined,
     frameDescriptions,
   };
 }

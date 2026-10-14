@@ -299,12 +299,10 @@ export async function uploadReport(
     }
   }
 
-  // Cache up to 3 frames as local images on disk for full evidence inspection in Vault
+  // Cache ONLY confirmed violation frames as local images on disk for evidence inspection in Vault
   let frameUris: string[] = [];
-  if (aiResult?.framesBase64 && aiResult.framesBase64.length > 0) {
+  if (isAccepted && aiResult?.framesBase64 && aiResult.framesBase64.length > 0) {
     frameUris = await saveFramesToDisk(finalReportId, aiResult.framesBase64);
-  } else if (clip.framesBase64 && clip.framesBase64.length > 0) {
-    frameUris = await saveFramesToDisk(finalReportId, clip.framesBase64);
   }
 
   // 1. Always save in local storage first so user evidence is NEVER lost or blocked

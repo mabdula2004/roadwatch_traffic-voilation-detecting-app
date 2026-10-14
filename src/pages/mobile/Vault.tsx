@@ -919,16 +919,22 @@ export function Vault() {
               <View style={styles.dossierSection}>
                 <View style={styles.sectionHeaderRow}>
                   <Text style={[styles.dossierSectionTitle, { color: colors.muted }]}>
-                    {selectedReport.frame_uris && selectedReport.frame_uris.length === 1
-                      ? (isUrdu ? 'خلاف ورزی کا تصدیقی ثبوت (کلیدی فریم)' : 'DECISIVE EVIDENCE KEYFRAME')
-                      : t('threeFramesInspected').toUpperCase()}
+                    {(() => {
+                      const fLen = selectedReport.frame_uris ? selectedReport.frame_uris.length : 0;
+                      if (fLen === 1) return isUrdu ? 'خلاف ورزی کا تصدیقی ثبوت (1 کلیدی فریم)' : 'CONFIRMED EVIDENCE (1 KEYFRAME)';
+                      if (fLen === 2) return isUrdu ? 'خلاف ورزی کے تصدیقی ثبوت (2 کلیدی فریمز)' : 'CONFIRMED EVIDENCE (2 KEYFRAMES)';
+                      if (fLen === 3) return isUrdu ? 'خلاف ورزی کے تصدیقی ثبوت (3 کلیدی فریمز)' : 'CONFIRMED EVIDENCE (3 KEYFRAMES)';
+                      return isUrdu ? 'ویڈیو فریمز' : 'VIDEO FOOTAGE EVIDENCE';
+                    })()}
                   </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Maximize2 size={11} color={colors.telemetry} />
-                    <Text style={{ fontSize: 11, color: colors.telemetry, fontWeight: '600' }}>
-                      {t('tapToZoomFrame')}
-                    </Text>
-                  </View>
+                  {selectedReport.frame_uris && selectedReport.frame_uris.length > 0 && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Maximize2 size={11} color={colors.telemetry} />
+                      <Text style={{ fontSize: 11, color: colors.telemetry, fontWeight: '600' }}>
+                        {t('tapToZoomFrame')}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 {selectedReport.frame_uris && selectedReport.frame_uris.length > 0 ? (
@@ -937,17 +943,15 @@ export function Vault() {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.dossierFramesScroll}
                   >
-                    {selectedReport.frame_uris.slice(0, 3).map((fUri, idx) => {
-                      const isVioMoment =
-                        (selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected)) &&
-                        idx === ((selectedReport.ai_result?.violationFrameIndex ?? 2) - 1);
-                      const timePct = idx === 0 ? 30 : idx === 1 ? 55 : 80;
-                      const customDesc = selectedReport.ai_result?.frameDescriptions?.[idx];
-                      const phaseLabel = isVioMoment
-                        ? (isUrdu ? '⚡ خلاف ورزی کا لمحہ (اہم ثبوت)' : '⚡ DECISIVE VIOLATION MOMENT')
-                        : idx === 0
-                        ? (isUrdu ? 'ابتدائی اپروچ اور پوزیشن' : 'Approach & Road Setup')
-                        : (isUrdu ? 'نمبر پلیٹ و حتمی ثبوت' : 'Plate Track & Proof');
+                    {(() => {
+                      const list = selectedReport.frame_uris;
+                      const totalF = list.length;
+                      return list.slice(0, 3).map((fUri, idx) => {
+                        const isVioMoment =
+                          selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected);
+                        const timePct = totalF === 1 ? 50 : idx === 0 ? 35 : idx === 1 ? 65 : 85;
+                        const customDesc = selectedReport.ai_result?.frameDescriptions?.[idx];
+                        const phaseLabel = isUrdu ? '⚡ خلاف ورزی کا تصدیقی لمحہ' : '⚡ CONFIRMED VIOLATION MOMENT';
 
                       return (
                         <TouchableOpacity
@@ -976,7 +980,9 @@ export function Vault() {
                               ]}
                             >
                               <Text style={styles.frameNumText}>
-                                {isVioMoment ? '⚡ Frame ' + (idx + 1) + ' · VIOLATION' : 'Frame ' + (idx + 1)}
+                                {isUrdu
+                                  ? `⚡ فریم ${idx + 1} · ثبوت`
+                                  : `⚡ Frame ${idx + 1} · EVIDENCE`}
                               </Text>
                             </View>
                             <View style={styles.frameZoomBadge}>
@@ -1014,30 +1020,17 @@ export function Vault() {
                           </View>
                         </TouchableOpacity>
                       );
-                    })}
+                    });
+                  })()}
                   </ScrollView>
                 ) : (
-                  <View style={styles.fallbackFramesRow}>
-                    {[1, 2, 3].map((num) => {
-                      const pct = num === 1 ? '20%' : num === 2 ? '50%' : '80%';
-                      return (
-                        <View
-                          key={num}
-                          style={[
-                            styles.fallbackFrameCard,
-                            { backgroundColor: colors.surface, borderColor: colors.edge },
-                          ]}
-                        >
-                          <Camera size={18} color={colors.muted} />
-                          <Text style={[styles.fallbackFrameTitle, { color: colors.ink }]}>
-                            Frame #{num} ({pct})
-                          </Text>
-                          <Text style={[styles.fallbackFrameSub, { color: colors.muted }]}>
-                            {num === 2 ? 'Violation Snapshot' : 'Plate Track'}
-                          </Text>
-                        </View>
-                      );
-                    })}
+                  <View style={[styles.noFramesNotice, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+                    <ShieldAlert size={16} color={colors.muted} />
+                    <Text style={[styles.noFramesNoticeText, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'اس کیس میں خلاف ورزی کا کوئی ثبوتی فریم ریکارڈ نہیں ہوا۔'
+                        : 'No violation keyframes confirmed on footage for this case.'}
+                    </Text>
                   </View>
                 )}
               </View>
@@ -1271,7 +1264,7 @@ export function Vault() {
                         ? 'Vehicle crossed the marked solid stop line 2.4 seconds after the signal turned amber-to-red. Clear visual frame sequence and registration plate confirmed under daylight conditions.'
                         : selectedReport.status === 'under_review' || selectedReport.status === 'pending_manual_review'
                         ? 'Citizen submitted PKR 100 manual review request. Video keyframes queued for certified traffic warden inspection.'
-                        : 'AI evaluated 3 video frames and found insufficient evidentiary support for traffic violation (Section 112). Penalty charged for invalid submission.')}
+                        : 'AI evaluated footage and found no actionable traffic violation under Section 112.')}
                   </Text>
 
                   {selectedReport.ai_result?.notes && (
@@ -1963,6 +1956,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 14,
     marginTop: 2,
+  },
+  noFramesNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginVertical: 4,
+  },
+  noFramesNoticeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
+    lineHeight: 18,
   },
   fallbackFramesRow: {
     flexDirection: 'row',
