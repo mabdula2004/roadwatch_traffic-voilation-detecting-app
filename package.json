@@ -1,0 +1,12 @@
+{
+  "name": "roadwatch-root",
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix app start",
+    "app": "npm --prefix app start",
+    "app:ios": "npm --prefix app run ios",
+    "app:android": "npm --prefix app run android",
+    "dashboard": "npm --prefix dashboard dev",
+    "build:dashboard": "npm --prefix dashboard run build"
+  }
+}
