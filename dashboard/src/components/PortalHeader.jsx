@@ -1,15 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Search, RefreshCw, Bell, UserCheck, ShieldAlert } from 'lucide-react';
-
-interface PortalHeaderProps {
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
-  pendingCount: number;
-  disputedCount: number;
-  approvedCount: number;
-  onRefresh: () => void;
-  isRefreshing: boolean;
-}
+import { ShieldCheck, Search, RefreshCw, UserCheck, ShieldAlert } from 'lucide-react';
 
 export function PortalHeader({
   searchQuery,
@@ -19,7 +9,7 @@ export function PortalHeader({
   approvedCount,
   onRefresh,
   isRefreshing,
-}: PortalHeaderProps) {
+}) {
   return (
     <header className="flex h-16 w-full items-center justify-between border-b border-edge bg-surface/80 px-6 backdrop-blur-md">
       {/* Left: Branding & Officer Status */}

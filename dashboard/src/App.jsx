@@ -5,9 +5,8 @@ import { CommandSidebar } from './components/CommandSidebar';
 import { PendingQueueWorkspace } from './components/PendingQueueWorkspace';
 import { CaseListWorkspace } from './components/CaseListWorkspace';
 import { ReporterRegistryWorkspace } from './components/ReporterRegistryWorkspace';
-import type { RealQueueCase, CommandTab } from './types/dashboard';
 
-const VIOLATION_MAP: Record<string, { name: string; fine: number }> = {
+const VIOLATION_MAP = {
   red_light_running: { name: 'Red Light Violation (Signal Jump)', fine: 2000 },
   helmet_violation: { name: 'No Safety Helmet (Rider / Pillion)', fine: 1000 },
   wrong_way_driving: { name: 'One-Way Violation / Wrong-Way Driving', fine: 2000 },
@@ -21,8 +20,8 @@ const VIOLATION_MAP: Record<string, { name: string; fine: number }> = {
 };
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<CommandTab>('Pending Queue');
-  const [cases, setCases] = useState<RealQueueCase[]>([]);
+  const [activeTab, setActiveTab] = useState('Pending Queue');
+  const [cases, setCases] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,8 +45,8 @@ export function App() {
         .select('user_id, name, email');
       const userMap = new Map((users || []).map((u) => [u.user_id, u.name || u.email]));
 
-      // 3. Map into clean RealQueueCase items
-      const mapped: RealQueueCase[] = (rawReports || []).map((r) => {
+      // 3. Map into clean queue items
+      const mapped = (rawReports || []).map((r) => {
         const vInfo = VIOLATION_MAP[r.claimed_class] || {
           name: r.claimed_class ? r.claimed_class.replace(/_/g, ' ').toUpperCase() : 'Traffic Violation',
           fine: 2000,
@@ -58,7 +57,7 @@ export function App() {
         const timeAgo = formatTimeAgo(dateObj);
 
         // Frame public URLs if stored in Supabase Storage evidence_vault
-        let frameUris: string[] = [];
+        let frameUris = [];
         if (Array.isArray(r.frame_uris) && r.frame_uris.length > 0) {
           frameUris = r.frame_uris;
         } else if (r.client_capture_id) {
@@ -166,7 +165,7 @@ export function App() {
   );
 
   // Officer Action: Approve Violation
-  const handleApproveCase = async (caseItem: RealQueueCase, note: string) => {
+  const handleApproveCase = async (caseItem, note) => {
     setIsProcessing(true);
     try {
       // 1. Update report status in Supabase
@@ -198,7 +197,7 @@ export function App() {
   };
 
   // Officer Action: Dismiss / Reject Violation
-  const handleRejectCase = async (caseItem: RealQueueCase, note: string) => {
+  const handleRejectCase = async (caseItem, note) => {
     setIsProcessing(true);
     try {
       await supabase
@@ -262,7 +261,7 @@ export function App() {
               cases={disputedCases}
               tone="accent"
               emptyMessage="No pending citizen disputed cases in queue."
-              onSelectCase={(c) => {
+              onSelectCase={() => {
                 setActiveTab('Pending Queue');
               }}
             />
@@ -295,7 +294,7 @@ export function App() {
   );
 }
 
-function formatTimeAgo(date: Date): string {
+function formatTimeAgo(date) {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 60) return `${Math.max(1, seconds)}s ago`;
   const minutes = Math.floor(seconds / 60);

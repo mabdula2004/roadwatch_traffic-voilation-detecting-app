@@ -1,44 +1,26 @@
 import React, { useState } from 'react';
 import {
-  Play,
-  Pause,
-  Maximize2,
   CheckCircle2,
-  XCircle,
-  ShieldAlert,
   Clock,
   MapPin,
   Car,
   FileText,
-  User,
-  Sparkles,
-  AlertTriangle,
   ZoomIn,
-  ShieldCheck,
   Check,
   X,
-  ExternalLink,
 } from 'lucide-react';
 import { Badge } from './ui/Badge';
-import type { RealQueueCase } from '../types/dashboard';
-
-interface PendingQueueWorkspaceProps {
-  cases: RealQueueCase[];
-  onApproveCase: (caseItem: RealQueueCase, officerNote: string) => Promise<void>;
-  onRejectCase: (caseItem: RealQueueCase, officerNote: string) => Promise<void>;
-  isProcessing: boolean;
-}
 
 export function PendingQueueWorkspace({
   cases,
   onApproveCase,
   onRejectCase,
   isProcessing,
-}: PendingQueueWorkspaceProps) {
-  const [selectedCaseId, setSelectedCaseId] = useState<string>(cases[0]?.reportId || '');
-  const [selectedFrameIndex, setSelectedFrameIndex] = useState<number>(0);
-  const [officerNote, setOfficerNote] = useState<string>('');
-  const [zoomModalImage, setZoomModalImage] = useState<string | null>(null);
+}) {
+  const [selectedCaseId, setSelectedCaseId] = useState(cases[0]?.reportId || '');
+  const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
+  const [officerNote, setOfficerNote] = useState('');
+  const [zoomModalImage, setZoomModalImage] = useState(null);
 
   const selectedCase = cases.find((c) => c.reportId === selectedCaseId) || cases[0];
 

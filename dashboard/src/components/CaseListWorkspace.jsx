@@ -1,25 +1,15 @@
 import React from 'react';
 import { Badge } from './ui/Badge';
-import { Eye, CheckCircle2, XCircle, Clock, MapPin, ShieldAlert } from 'lucide-react';
-import type { RealQueueCase } from '../types/dashboard';
-
-interface CaseListWorkspaceProps {
-  title: string;
-  description: string;
-  cases: RealQueueCase[];
-  tone: 'accent' | 'valid' | 'danger' | 'telemetry';
-  emptyMessage?: string;
-  onSelectCase?: (caseItem: RealQueueCase) => void;
-}
+import { Eye, Clock } from 'lucide-react';
 
 export function CaseListWorkspace({
   title,
   description,
   cases,
-  tone,
+  tone = 'neutral',
   emptyMessage = 'No records found in this category.',
   onSelectCase,
-}: CaseListWorkspaceProps) {
+}) {
   return (
     <div className="thin-scroll flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
       {/* Header */}

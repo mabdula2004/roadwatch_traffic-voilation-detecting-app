@@ -5,21 +5,8 @@ import {
   CheckCircle2,
   XCircle,
   Users,
-  ShieldCheck,
   Radio,
-  Sliders,
-  ExternalLink,
 } from 'lucide-react';
-import type { CommandTab } from '../types/dashboard';
-
-interface CommandSidebarProps {
-  activeTab: CommandTab;
-  onSelectTab: (tab: CommandTab) => void;
-  pendingCount: number;
-  disputedCount: number;
-  approvedCount: number;
-  rejectedCount: number;
-}
 
 export function CommandSidebar({
   activeTab,
@@ -28,10 +15,10 @@ export function CommandSidebar({
   disputedCount,
   approvedCount,
   rejectedCount,
-}: CommandSidebarProps) {
+}) {
   const tabs = [
     {
-      key: 'Pending Queue' as CommandTab,
+      key: 'Pending Queue',
       label: 'Pending Queue',
       Icon: Inbox,
       badge: pendingCount > 0 ? String(pendingCount) : undefined,
@@ -39,7 +26,7 @@ export function CommandSidebar({
       description: 'Awaiting certified warden audit',
     },
     {
-      key: 'Disputed Cases' as CommandTab,
+      key: 'Disputed Cases',
       label: 'Disputed Cases',
       Icon: Gavel,
       badge: disputedCount > 0 ? String(disputedCount) : undefined,
@@ -47,7 +34,7 @@ export function CommandSidebar({
       description: 'PKR 100 Citizen Review Fee Paid',
     },
     {
-      key: 'Approved Today' as CommandTab,
+      key: 'Approved Today',
       label: 'Approved Today',
       Icon: CheckCircle2,
       badge: approvedCount > 0 ? String(approvedCount) : undefined,
@@ -55,7 +42,7 @@ export function CommandSidebar({
       description: 'Issued e-citations & paid bounties',
     },
     {
-      key: 'Rejected Cases' as CommandTab,
+      key: 'Rejected Cases',
       label: 'Dismissed Reports',
       Icon: XCircle,
       badge: rejectedCount > 0 ? String(rejectedCount) : undefined,
@@ -63,7 +50,7 @@ export function CommandSidebar({
       description: 'Insufficient clarity or lawful traffic',
     },
     {
-      key: 'Reporter Registry' as CommandTab,
+      key: 'Reporter Registry',
       label: 'Reporter Registry',
       Icon: Users,
       description: 'Citizens trust scores & CNIC audit',
@@ -79,7 +66,7 @@ export function CommandSidebar({
             Enforcement Workspaces
           </p>
           <nav className="space-y-1">
-            {tabs.map(({ key, label, Icon, badge, badgeTone, description }) => {
+            {tabs.map(({ key, label, Icon, badge, badgeTone }) => {
               const isActive = activeTab === key;
               return (
                 <button

@@ -1,21 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Badge } from './ui/Badge';
-import { Users, ShieldCheck, RefreshCw } from 'lucide-react';
-
-interface ReporterUser {
-  user_id: string;
-  name: string;
-  email: string;
-  role: string;
-  account_state: string;
-  created_at?: string;
-  trust_score?: number;
-  vehicle_plate?: string;
-}
+import { ShieldCheck, RefreshCw } from 'lucide-react';
 
 export function ReporterRegistryWorkspace() {
-  const [reporters, setReporters] = useState<ReporterUser[]>([]);
+  const [reporters, setReporters] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchReporters = async () => {
