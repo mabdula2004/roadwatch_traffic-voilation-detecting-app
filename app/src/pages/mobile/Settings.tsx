@@ -45,7 +45,7 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
   const [stats, setStats] = useState({ approved: 0, rejected: 0 });
 
   useEffect(() => {
-    void refreshProfile().catch(() => {});
+    void refreshProfile().catch(() => { });
   }, [refreshProfile]);
 
   useEffect(() => {

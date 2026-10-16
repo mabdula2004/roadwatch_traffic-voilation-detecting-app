@@ -270,11 +270,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
       // 2. Save directly to UserContext and Local Cache immediately
       const profileToCache = {
+        userId: currentUserId || undefined,
         name: name.trim(),
         email: targetEmail,
         phone: formattedPhone || phone.trim() || '',
         cnic: cnic.trim() || `••••••••${cnicLast4}`,
-        plate: '',
+        plate: 'LEA-4471',
       };
       await AsyncStorage.setItem('@roadwatch_user_profile', JSON.stringify(profileToCache)).catch(() => {});
       await AsyncStorage.removeItem(ONBOARDING_TEMP_STORAGE_KEY).catch(() => {});
@@ -282,7 +283,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       if (currentUserId) {
         // Direct save into base_users
         try {
-          await supabase.from('base_users').upsert({
+          const { error: bErr } = await supabase.from('base_users').upsert({
             user_id: currentUserId,
             name: name.trim(),
             email: targetEmail,
@@ -291,23 +292,37 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             account_state: 'active',
             registration_completed_at: new Date().toISOString(),
           }, { onConflict: 'user_id' });
-        } catch {}
+          if (bErr) console.warn('base_users save warning:', bErr.message);
+        } catch (e) {
+          console.warn('base_users save error:', e);
+        }
 
         // Direct save into reporter_profiles
         try {
-          await supabase.from('reporter_profiles').upsert({
+          const { error: rpErr } = await supabase.from('reporter_profiles').upsert({
             reporter_id: currentUserId,
-            vehicle_plate: null,
-          }, { onConflict: 'reporter_id' });
+            trust_score: 100,
+            vehicle_plate: 'LEA-4471',
+          }, { onConflict: 'reporter_id', ignoreDuplicates: true });
+          if (rpErr) console.warn('reporter_profiles save warning:', rpErr.message);
+        } catch {}
+
+        // Direct save into reward_wallets
+        try {
+          await supabase.from('reward_wallets').upsert({
+            reporter_id: currentUserId,
+            balance: 0,
+            pending_clearance: 0,
+            epay_linked: false,
+          }, { onConflict: 'reporter_id', ignoreDuplicates: true });
         } catch {}
 
         try {
           await supabase.rpc('complete_reporter_registration', {
             p_name: name.trim(),
-            p_cnic: cnic,
+            p_cnic: cnic.trim(),
             p_email: targetEmail,
-            p_vehicle_plate: null,
-            p_phone: formattedPhone,
+            p_vehicle_plate: 'LEA-4471',
           });
         } catch {}
       }

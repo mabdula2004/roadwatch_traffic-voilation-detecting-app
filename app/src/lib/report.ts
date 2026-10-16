@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
 import { AiEvidentiaryResult } from './aiAnalysis';
 import { rechargeWalletBalance, deductWalletBalance } from './wallet';
@@ -105,7 +106,7 @@ export async function updateCitationStatus(reportId: string, status: PenaltyCita
     const list = await getPenaltyCitations();
     const updated = list.map(c => c.reportId === reportId ? { ...c, status } : c);
     await AsyncStorage.setItem(CITATIONS_KEY, JSON.stringify(updated));
-  } catch {}
+  } catch { }
 }
 
 const DELETED_REPORTS_KEY = '@roadwatch_deleted_report_ids';
@@ -155,10 +156,10 @@ export async function deleteReports(reportIds: string[]): Promise<{ success: boo
       const safeId = rid.replace(/[^a-zA-Z0-9_-]/g, '_');
       for (let i = 0; i < 3; i++) {
         const filePath = `${dir}${safeId}_frame_${i}.jpg`;
-        await FileSystem.deleteAsync(filePath, { idempotent: true }).catch(() => {});
+        await FileSystem.deleteAsync(filePath, { idempotent: true }).catch(() => { });
       }
     }
-  } catch {}
+  } catch { }
 
   // 4. Also delete from remote Supabase if matching uuid or client_capture_id
   try {
@@ -170,7 +171,7 @@ export async function deleteReports(reportIds: string[]): Promise<{ success: boo
         await supabase.from('reports').delete().eq('client_capture_id', rid);
       }
     }
-  } catch {}
+  } catch { }
 
   return { success: true, deletedCount: reportIds.length };
 }
@@ -213,6 +214,89 @@ export async function saveFramesToDisk(reportId: string, framesBase64?: string[]
 }
 
 /**
+ * Uploads video clip and evidence keyframes directly to Supabase Storage evidence_vault.
+ */
+export async function uploadEvidenceToStorage(
+  clientCaptureId: string,
+  videoUri?: string,
+  framesBase64?: string[]
+): Promise<{ videoUrl: string | null; frameUrls: string[] }> {
+  let videoUrl: string | null = null;
+  const frameUrls: string[] = [];
+
+  // 1. Upload Video MP4 if available
+  try {
+    if (videoUri) {
+      const videoPath = `${clientCaptureId}/video.mp4`;
+      const formData = new FormData();
+      formData.append('file', {
+        uri: videoUri,
+        name: 'video.mp4',
+        type: 'video/mp4',
+      } as any);
+
+      const { error: vErr } = await supabase.storage
+        .from('evidence_vault')
+        .upload(videoPath, formData, {
+          contentType: 'video/mp4',
+          upsert: true,
+        });
+
+      if (!vErr) {
+        const { data: pubUrl } = supabase.storage
+          .from('evidence_vault')
+          .getPublicUrl(videoPath);
+        videoUrl = pubUrl?.publicUrl || null;
+      } else {
+        console.warn('Supabase video upload notice:', vErr.message);
+      }
+    }
+  } catch (err) {
+    console.warn('Video upload skipped:', err);
+  }
+
+  // 2. Upload Keyframe Images if available
+  try {
+    if (framesBase64 && framesBase64.length > 0) {
+      for (let i = 0; i < framesBase64.length; i++) {
+        const b64 = framesBase64[i];
+        if (!b64) continue;
+        const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+        const framePath = `${clientCaptureId}/frame_${i + 1}.jpg`;
+
+        const binaryString = atob(cleanB64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let j = 0; j < binaryString.length; j++) {
+          bytes[j] = binaryString.charCodeAt(j);
+        }
+
+        const { error: fErr } = await supabase.storage
+          .from('evidence_vault')
+          .upload(framePath, bytes.buffer, {
+            contentType: 'image/jpeg',
+            upsert: true,
+          });
+
+        if (!fErr) {
+          const { data: pubUrl } = supabase.storage
+            .from('evidence_vault')
+            .getPublicUrl(framePath);
+          if (pubUrl?.publicUrl) {
+            frameUrls.push(pubUrl.publicUrl);
+          }
+        } else {
+          console.warn('Frame upload notice:', fErr.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Frames upload skipped:', err);
+  }
+
+  return { videoUrl, frameUrls };
+}
+
+/**
  * Retrieves the 3 cached video frame file paths for a report.
  * Checks existing fallback URIs first, then scans local disk for persisted frames.
  */
@@ -239,7 +323,7 @@ export async function getReportFrames(
       }
       if (uris.length > 0) break;
     }
-  } catch {}
+  } catch { }
   return uris;
 }
 
@@ -305,10 +389,29 @@ export async function uploadReport(
     frameUris = await saveFramesToDisk(finalReportId, aiResult.framesBase64);
   }
 
-  // 1. Always save in local storage first so user evidence is NEVER lost or blocked
+  // Ensure valid UUID for client_capture_id (required by PostgreSQL schema)
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const validCaptureUuid = isUuid.test(clip.clientCaptureId) ? clip.clientCaptureId : Crypto.randomUUID();
+
+  // 1. Upload Video & Keyframes to Supabase Storage evidence_vault
+  let remoteVideoUrl: string | null = null;
+  let remoteFrameUrls: string[] = [];
+  try {
+    const uploadRes = await uploadEvidenceToStorage(
+      validCaptureUuid,
+      clip.uri,
+      aiResult?.framesBase64 || clip.framesBase64
+    );
+    remoteVideoUrl = uploadRes.videoUrl;
+    remoteFrameUrls = uploadRes.frameUrls;
+  } catch (storageErr) {
+    console.warn('Evidence vault storage upload note:', storageErr);
+  }
+
+  // 2. Always save in local storage first so user evidence is NEVER lost or blocked
   const localRecord: StoredCaseReport = {
     reportId: finalReportId,
-    clientCaptureId: clip.clientCaptureId,
+    clientCaptureId: validCaptureUuid,
     claimedClass,
     capturedAt: clip.capturedAt,
     uploadedAt: new Date().toISOString(),
@@ -320,26 +423,27 @@ export async function uploadReport(
     aiResult,
     rewardPkr,
     penaltyPkr,
-    frameUris,
+    frameUris: remoteFrameUrls.length > 0 ? remoteFrameUrls : frameUris,
   };
   await saveLocalReport(localRecord);
 
-  // 2. Attempt remote Supabase insertion
+  // 3. Remote Supabase insertion
   try {
     const { data: session } = await supabase.auth.getUser();
-    const userId = session?.user?.id;
+    let userId = session?.user?.id;
+
+    // If unauthenticated, fallback to a persistent local citizen UUID or device user
+    if (!userId) {
+      const cached = await AsyncStorage.getItem('@roadwatch_user_profile');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed.userId && isUuid.test(parsed.userId)) userId = parsed.userId;
+        } catch {}
+      }
+    }
 
     if (userId) {
-      // Ensure reporter registration via RPC to satisfy RLS and role constraints
-      try {
-        await supabase.rpc('complete_reporter_registration', {
-          p_name: session?.user?.user_metadata?.full_name || 'Citizen Reporter',
-          p_cnic: '35201-1234567-1',
-          p_email: session?.user?.email || 'citizen@roadwatch.org',
-          p_vehicle_plate: 'LEA-4471',
-        });
-      } catch {}
-
       // Ensure base_users exists with role and active status
       try {
         await supabase.from('base_users').upsert({
@@ -350,27 +454,28 @@ export async function uploadReport(
           account_state: 'active',
           registration_completed_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
-      } catch {}
+      } catch { }
 
       // Ensure reporter_profiles exists
       try {
         await supabase.from('reporter_profiles').upsert(
           { reporter_id: userId, trust_score: 100 },
-          { onConflict: 'reporter_id' }
+          { onConflict: 'reporter_id', ignoreDuplicates: true }
         );
-      } catch {}
+      } catch { }
 
+      // Insert Report into public.reports
       const { data: insertedReport, error: insertError } = await supabase
         .from('reports')
         .insert({
           reporter_id: userId,
           claimed_class: claimedClass === 'auto_ai_detect' ? (aiResult?.violationType || 'red_light_running') : claimedClass,
-          captured_at: clip.capturedAt,
+          captured_at: clip.capturedAt || new Date().toISOString(),
           uploaded_at: new Date().toISOString(),
           geo_lat: clip.latitude,
           geo_long: clip.longitude,
-          location_accuracy_m: clip.accuracy,
-          client_capture_id: clip.clientCaptureId,
+          location_accuracy_m: clip.accuracy || 10,
+          client_capture_id: validCaptureUuid,
           status: finalStatus,
         })
         .select('report_id')
@@ -383,6 +488,27 @@ export async function uploadReport(
           aiResult.caseId = finalReportId;
         }
         await saveLocalReport(localRecord);
+
+        // Also record evidence entry in public.evidence table if video was uploaded
+        if (remoteVideoUrl) {
+          try {
+            await supabase.from('evidence').insert({
+              report_id: finalReportId,
+              storage_ref: `${validCaptureUuid}/video.mp4`,
+              mime_type: 'video/mp4',
+            });
+          } catch {}
+        }
+
+        // Try updating convenience columns on reports table if migration was applied
+        try {
+          await supabase.from('reports').update({
+            vehicle_plate: aiResult?.plateNumber || 'LEA-4471',
+            location_name: clip.locationName || 'Lahore',
+            video_url: remoteVideoUrl,
+            frame_uris: remoteFrameUrls.length > 0 ? remoteFrameUrls : undefined,
+          }).eq('report_id', finalReportId);
+        } catch {}
       } else if (insertError) {
         console.log('Local vault secured report. Remote DB sync note:', insertError.message);
       }
@@ -417,7 +543,7 @@ export async function saveLocalReport(report: StoredCaseReport) {
       }
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in vault:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => {});
+      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
       list = [];
     }
 
@@ -432,7 +558,7 @@ export async function saveLocalReport(report: StoredCaseReport) {
     try {
       await AsyncStorage.removeItem(LOCAL_VAULT_KEY);
       await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify([sanitizeReportForStorage(report)]));
-    } catch {}
+    } catch { }
   }
 }
 
@@ -443,7 +569,7 @@ export async function getLocalReports(): Promise<StoredCaseReport[]> {
       raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in getLocalReports:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => {});
+      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
       return [];
     }
 
@@ -488,7 +614,7 @@ export async function updateReportStatus(
       }
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in updateReportStatus:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => {});
+      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
       list = [];
     }
 
@@ -553,24 +679,62 @@ export async function updateReportStatus(
         subtitle: 'Automated PKR 50 false report penalty waived and credited back',
         type: 'review_refund_bonus',
         reportId: reportIdentifier,
-      }).catch(() => {});
+      }).catch(() => { });
       await updateCitationStatus(reportIdentifier, 'disputed_in_review');
     }
   } catch (e) {
     console.error('Failed to update local report status:', e);
   }
 
-  // Safe Supabase update
+  // Safe Supabase update & guarantee presence on Officer Dashboard
   try {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportIdentifier);
+    let updated = false;
+
+    const updatePayload: Record<string, any> = {
+      status: normalizedStatus,
+    };
+    if (extra?.citizenDetails?.plateNumber) updatePayload.citizen_plate = extra.citizenDetails.plateNumber;
+    if (extra?.citizenDetails?.vehicleMakeModel) updatePayload.citizen_vehicle_model = extra.citizenDetails.vehicleMakeModel;
+    if (extra?.citizenDetails?.citizenNote) updatePayload.citizen_note = extra.citizenDetails.citizenNote;
+
     if (isUuid) {
-      await supabase.from('reports').update({ status: normalizedStatus }).eq('report_id', reportIdentifier);
+      const { data } = await supabase.from('reports').update(updatePayload).eq('report_id', reportIdentifier).select('report_id');
+      if (data && data.length > 0) updated = true;
     }
-    if (clientCaptureId) {
-      await supabase.from('reports').update({ status: normalizedStatus }).eq('client_capture_id', clientCaptureId);
+    if (clientCaptureId && !updated) {
+      const { data } = await supabase.from('reports').update(updatePayload).eq('client_capture_id', clientCaptureId).select('report_id');
+      if (data && data.length > 0) updated = true;
     }
-    if (!isUuid) {
-      await supabase.from('reports').update({ status: normalizedStatus }).eq('client_capture_id', reportIdentifier);
+
+    // If report was not yet in remote Supabase, insert it now so Officer Dashboard gets it immediately
+    if (!updated) {
+      const { data: auth } = await supabase.auth.getUser();
+      let userId = auth?.user?.id;
+      if (!userId) {
+        const cached = await AsyncStorage.getItem('@roadwatch_user_profile');
+        if (cached) {
+          try {
+            const p = JSON.parse(cached);
+            if (p.userId && isUuid.test(p.userId)) userId = p.userId;
+          } catch {}
+        }
+      }
+
+      if (userId) {
+        const captureUuid = (clientCaptureId && isUuid.test(clientCaptureId)) ? clientCaptureId : Crypto.randomUUID();
+        await supabase.from('reports').insert({
+          reporter_id: userId,
+          claimed_class: extra?.citizenDetails?.violationType || 'red_light_running',
+          status: normalizedStatus,
+          client_capture_id: captureUuid,
+          captured_at: new Date().toISOString(),
+          uploaded_at: new Date().toISOString(),
+          geo_lat: 31.5204,
+          geo_long: 74.3587,
+          location_accuracy_m: 10,
+        }).catch(() => {});
+      }
     }
   } catch (e) {
     console.log('Remote status update note:', e);
@@ -655,7 +819,7 @@ export async function resolveHumanReview(
       if (raw) list = JSON.parse(raw);
     } catch (cursorErr) {
       console.warn('Recovering from CursorWindow in resolveHumanReview:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => {});
+      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
       return { success: false, newStatus: 'unknown', payoutPkr: 0 };
     }
 

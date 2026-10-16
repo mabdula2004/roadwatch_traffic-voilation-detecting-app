@@ -185,7 +185,7 @@ export function App() {
           p_report_id: caseItem.reportId,
           p_payout_amount: 300,
         });
-      } catch {}
+      } catch { }
 
       // Refresh list
       await fetchCases();
