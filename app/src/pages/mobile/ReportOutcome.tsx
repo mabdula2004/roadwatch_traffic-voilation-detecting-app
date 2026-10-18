@@ -9,6 +9,8 @@ import {
   Modal,
   Dimensions,
   ActivityIndicator,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -33,12 +35,24 @@ import {
   PlusCircle,
   X,
   CreditCard,
+  Edit3,
+  Check,
+  FileText,
+  Info,
 } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Colors } from '../../constants/theme';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
-import { CapturedClip, updateReportStatus, saveLocalReport, getLocalReports, saveFramesToDisk } from '../../lib/report';
+import {
+  CapturedClip,
+  updateReportStatus,
+  updateReportCitizenDetails,
+  saveLocalReport,
+  getLocalReports,
+  saveFramesToDisk,
+} from '../../lib/report';
+import { VIOLATION_TAXONOMY } from '../../lib/violations';
 import { getWalletBalance, deductWalletBalance, rechargeWalletBalance } from '../../lib/wallet';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -72,6 +86,28 @@ export function ReportOutcome({
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isManualSubmitted, setIsManualSubmitted] = useState(false);
   const [processingDeduction, setProcessingDeduction] = useState(false);
+
+  // Citizen Manual Evidence Overrides & Edit State
+  const [showEditDetailsModal, setShowEditDetailsModal] = useState(false);
+  const [citizenPlate, setCitizenPlate] = useState(aiResult.citizenPlate || aiResult.plateNumber || '');
+  const [citizenVehicleColor, setCitizenVehicleColor] = useState(
+    aiResult.citizenVehicleColor || (aiResult.vehicleColor !== 'Unknown' ? aiResult.vehicleColor : '')
+  );
+  const [citizenVehicleModel, setCitizenVehicleModel] = useState(
+    aiResult.citizenVehicleMakeModel ||
+    (aiResult.vehicleMakeModel !== 'Not Identified' && aiResult.vehicleMakeModel !== 'Pending Sync' ? aiResult.vehicleMakeModel : '')
+  );
+  const [citizenVehicleType, setCitizenVehicleType] = useState(
+    aiResult.citizenVehicleType || (aiResult.vehicleType !== 'Unknown' ? aiResult.vehicleType : 'Car')
+  );
+  const [citizenViolationType, setCitizenViolationType] = useState(
+    aiResult.citizenViolationType || aiResult.violationType || 'red_light_running'
+  );
+  const [citizenNote, setCitizenNote] = useState(aiResult.citizenNote || '');
+  const [hasCitizenEdited, setHasCitizenEdited] = useState(Boolean(aiResult.isCitizenEdited));
+
+  const currentViolation = VIOLATION_TAXONOMY.find(v => v.code === citizenViolationType);
+  const currentViolationName = currentViolation?.name || aiResult.violationName || citizenViolationType;
 
   useEffect(() => {
     if (selectedZoomIndex !== null) {
@@ -143,6 +179,28 @@ export function ReportOutcome({
     }
   };
 
+  const handleSaveCitizenDetails = async () => {
+    const effectiveId = reportId || aiResult.caseId;
+    const details = {
+      plateNumber: citizenPlate.trim(),
+      vehicleMakeModel: citizenVehicleModel.trim(),
+      vehicleColor: citizenVehicleColor.trim(),
+      vehicleType: citizenVehicleType,
+      violationType: citizenViolationType,
+      violationName: currentViolationName,
+      citizenNote: citizenNote.trim(),
+    };
+    await updateReportCitizenDetails(effectiveId, details, clip.clientCaptureId);
+    setHasCitizenEdited(true);
+    setShowEditDetailsModal(false);
+    Alert.alert(
+      isUrdu ? 'تفصیلات محفوظ ہوگئیں' : 'Details Attached!',
+      isUrdu
+        ? 'آپ کی فراہم کردہ نمبر پلیٹ اور گاڑی کی معلومات کیس سے منسلک کر دی گئی ہیں اور وارڈن آڈٹ کے لیے تیار ہیں۔'
+        : 'Your manual vehicle & plate details have been saved and attached to this case for officer audit.'
+    );
+  };
+
   const handleConfirmManualReview = async () => {
     if (processingDeduction) return;
     setProcessingDeduction(true);
@@ -159,9 +217,23 @@ export function ReportOutcome({
         setIsManualSubmitted(true);
         setShowConfirmModal(false);
 
+        const citizenDetailsPayload = hasCitizenEdited ? {
+          plateNumber: citizenPlate.trim(),
+          vehicleMakeModel: citizenVehicleModel.trim(),
+          vehicleColor: citizenVehicleColor.trim(),
+          vehicleType: citizenVehicleType,
+          violationType: citizenViolationType,
+          violationName: currentViolationName,
+          citizenNote: citizenNote.trim(),
+        } : undefined;
+
         // 1. Update report status if exists by effective ID and clientCaptureId
         const frameUris = await saveFramesToDisk(effectiveId, aiResult.framesBase64 || clip.framesBase64);
-        await updateReportStatus(effectiveId, 'under_review', clip.clientCaptureId, { frameUris, aiResult });
+        await updateReportStatus(effectiveId, 'under_review', clip.clientCaptureId, {
+          frameUris,
+          aiResult,
+          citizenDetails: citizenDetailsPayload,
+        });
 
         // 2. Guarantee it exists in local vault even if previous upload had failed
         const localList = await getLocalReports();
@@ -170,7 +242,7 @@ export function ReportOutcome({
           await saveLocalReport({
             reportId: effectiveId,
             clientCaptureId: clip.clientCaptureId,
-            claimedClass: 'auto_ai_detect',
+            claimedClass: citizenViolationType || 'auto_ai_detect',
             capturedAt: clip.capturedAt,
             uploadedAt: new Date().toISOString(),
             latitude: clip.latitude,
@@ -182,6 +254,14 @@ export function ReportOutcome({
             penaltyPkr: 50,
             penaltyRefunded: true,
             frameUris,
+            citizenPlate: citizenPlate.trim() || undefined,
+            citizenVehicleMakeModel: citizenVehicleModel.trim() || undefined,
+            citizenVehicleColor: citizenVehicleColor.trim() || undefined,
+            citizenVehicleType: citizenVehicleType || undefined,
+            citizenViolationType: citizenViolationType || undefined,
+            citizenViolationName: currentViolationName || undefined,
+            citizenNote: citizenNote.trim() || undefined,
+            isCitizenEdited: hasCitizenEdited,
           });
         }
 
@@ -209,8 +289,11 @@ export function ReportOutcome({
     }
   };
 
-  // Frames to show (either from aiResult or clip)
-  const frames = aiResult.framesBase64 || clip.framesBase64 || [];
+  // Frames to show: ONLY confirmed frames from aiResult when violation is detected (1, 2, or 3 frames), or none if no violation
+  const frames = (aiResult.violationDetected && aiResult.framesBase64 && aiResult.framesBase64.length > 0)
+    ? aiResult.framesBase64
+    : [];
+
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.canvas }]}>
@@ -333,23 +416,23 @@ export function ReportOutcome({
           <View style={{ marginTop: 18 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <Text style={[styles.sectionHeading, { color: colors.muted, marginBottom: 0 }]}>
-                ANALYZED VIDEO FRAMES ({frames.length} FRAMES INSPECTED)
+                {frames.length === 1
+                  ? (isUrdu ? 'خلاف ورزی کا تصدیقی ثبوت (1 کلیدی فریم)' : 'CONFIRMED VIOLATION EVIDENCE (1 KEYFRAME)')
+                  : isUrdu
+                  ? `خلاف ورزی کے تصدیقی ثبوت (${frames.length} کلیدی فریمز)`
+                  : `CONFIRMED VIOLATION EVIDENCE (${frames.length} KEYFRAMES)`}
               </Text>
               <Text style={{ fontSize: 11, color: colors.telemetry, fontWeight: '600' }}>
-                Tap to inspect
+                {isUrdu ? 'بڑا دیکھنے کے لیے ٹیپ کریں' : 'Tap to inspect'}
               </Text>
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.framesScrollContainer}>
               {frames.map((frameB64, idx) => {
-                const isVioMoment = aiResult.violationDetected && idx === ((aiResult.violationFrameIndex ?? 2) - 1);
-                const timePct = idx === 0 ? 30 : idx === 1 ? 55 : 80;
+                const isVioMoment = true;
+                const timePct = frames.length === 1 ? 50 : idx === 0 ? 35 : idx === 1 ? 65 : 85;
                 const customDesc = aiResult.frameDescriptions?.[idx];
-                const phaseLabel = isVioMoment
-                  ? (isUrdu ? '⚡ خلاف ورزی کا لمحہ' : '⚡ VIOLATION MOMENT')
-                  : idx === 0
-                  ? (isUrdu ? 'اپروچ اور پوزیشن' : 'Approach')
-                  : (isUrdu ? 'پلیٹ و حتمی ثبوت' : 'Plate Track');
+                const phaseLabel = isUrdu ? '⚡ خلاف ورزی کی تصدیق' : '⚡ VIOLATION CONFIRMED';
 
                 return (
                   <TouchableOpacity
@@ -358,8 +441,8 @@ export function ReportOutcome({
                       styles.frameCard,
                       {
                         backgroundColor: colors.surface,
-                        borderColor: isVioMoment ? '#ef4444' : colors.edge,
-                        borderWidth: isVioMoment ? 2 : 1,
+                        borderColor: '#ef4444',
+                        borderWidth: 2,
                       },
                     ]}
                     activeOpacity={0.85}
@@ -374,11 +457,11 @@ export function ReportOutcome({
                       <View
                         style={[
                           styles.frameIndexPill,
-                          isVioMoment && { backgroundColor: '#ef4444' },
+                          { backgroundColor: '#ef4444' },
                         ]}
                       >
                         <Text style={styles.frameIndexText}>
-                          {isVioMoment ? '⚡ Frame ' + (idx + 1) + ' · VIOLATION' : 'Frame ' + (idx + 1)}
+                          {isUrdu ? `⚡ فریم ${idx + 1} · تصدیق شدہ ثبوت` : `⚡ Frame ${idx + 1} · EVIDENCE`}
                         </Text>
                       </View>
                       <View style={styles.frameZoomBtn}>
@@ -394,7 +477,7 @@ export function ReportOutcome({
                         style={{
                           fontSize: 10,
                           fontWeight: '700',
-                          color: isVioMoment ? '#ef4444' : colors.ink,
+                          color: '#ef4444',
                           marginTop: 2,
                         }}
                         numberOfLines={1}
@@ -449,6 +532,40 @@ export function ReportOutcome({
                 : 'If you believe the AI missed a traffic violation or misread road conditions, submit this clip and key frames to a certified traffic warden for legal manual audit.'}
             </Text>
 
+            {/* Citizen Details Attached Banner / Prompt */}
+            {!isManualSubmitted && (
+              hasCitizenEdited ? (
+                <View style={[styles.citizenAttachedBanner, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)' }]}>
+                  <CheckCircle2 size={14} color="#10b981" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
+                      {isUrdu ? 'شہری کی فراہم کردہ تفصیلات منسلک ہیں' : 'Citizen Evidence Details Attached'}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: colors.ink, marginTop: 1 }}>
+                      Plate: {citizenPlate || 'Pending'} · {[citizenVehicleColor, citizenVehicleModel].filter(Boolean).join(' ') || citizenVehicleType}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setShowEditDetailsModal(true)}>
+                    <Text style={{ fontSize: 11, color: colors.telemetry, fontWeight: '700' }}>
+                      {isUrdu ? 'ترمیم' : 'Edit ✏️'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.attachDetailsPromptBtn, { backgroundColor: 'rgba(59, 130, 246, 0.08)', borderColor: 'rgba(59, 130, 246, 0.3)' }]}
+                  activeOpacity={0.8}
+                  onPress={() => setShowEditDetailsModal(true)}
+                >
+                  <Edit3 size={13} color="#3b82f6" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6', flex: 1 }}>
+                    {isUrdu ? 'پلیٹ یا گاڑی کی صحیح تفصیلات دستی درج کریں' : 'Manually Provide Plate / Vehicle Info for Warden'}
+                  </Text>
+                  <ChevronRight size={13} color="#3b82f6" />
+                </TouchableOpacity>
+              )
+            )}
+
             {/* Wallet balance telemetry */}
             <View style={[styles.walletStatusRow, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -483,8 +600,29 @@ export function ReportOutcome({
           </View>
         )}
 
-        {/* Vehicle & Target Telemetry */}
-        <Text style={[styles.sectionHeading, { color: colors.muted, marginTop: 18 }]}>VEHICLE & LOCATION TELEMETRY</Text>
+        {/* Vehicle & Target Telemetry Header with Manual Edit Action */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, marginBottom: 8 }}>
+          <Text style={[styles.sectionHeading, { color: colors.muted, marginTop: 0, marginBottom: 0 }]}>
+            VEHICLE & LOCATION TELEMETRY
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.editTelemetryBtn,
+              {
+                backgroundColor: hasCitizenEdited ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+                borderColor: hasCitizenEdited ? '#10b981' : '#3b82f6',
+              },
+            ]}
+            activeOpacity={0.8}
+            onPress={() => setShowEditDetailsModal(true)}
+          >
+            <Edit3 size={12} color={hasCitizenEdited ? '#10b981' : '#3b82f6'} />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: hasCitizenEdited ? '#10b981' : '#3b82f6' }}>
+              {hasCitizenEdited ? (isUrdu ? 'ترمیم شدہ ✓' : 'Details Attached ✓') : (isUrdu ? 'دستی درج کریں ✏️' : 'Manual Edit ✏️')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={[styles.detailCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
           {/* Plate Row */}
           <View style={styles.detailRow}>
@@ -492,7 +630,24 @@ export function ReportOutcome({
               <Hash size={16} color={colors.telemetry} />
               <Text style={[styles.detailKey, { color: colors.muted }]}>License Plate</Text>
             </View>
-            {aiResult.plateNumber ? (
+            {hasCitizenEdited && citizenPlate ? (
+              <View style={{ alignItems: 'flex-end' }}>
+                <View style={[styles.platePill, { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10b981' }]}>
+                  <Text style={[styles.plateNumberText, { color: '#10b981', letterSpacing: 1 }]}>{citizenPlate.toUpperCase()}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 }}>
+                  <CheckCircle2 size={10} color="#10b981" />
+                  <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '700' }}>
+                    {isUrdu ? 'شہری کی فراہم کردہ' : 'Citizen Specified'}
+                  </Text>
+                </View>
+                {aiResult.plateNumber && aiResult.plateNumber !== citizenPlate && (
+                  <Text style={{ fontSize: 9, color: colors.muted, marginTop: 1 }}>
+                    (AI read: {aiResult.plateNumber})
+                  </Text>
+                )}
+              </View>
+            ) : aiResult.plateNumber ? (
               <View style={{ alignItems: 'flex-end' }}>
                 <View style={[styles.platePill, { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10b981' }]}>
                   <Text style={[styles.plateNumberText, { color: '#10b981' }]}>{aiResult.plateNumber}</Text>
@@ -500,15 +655,22 @@ export function ReportOutcome({
                 <Text style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>{aiResult.plateConfidence}% confidence</Text>
               </View>
             ) : (
-              <Text style={[styles.detailVal, { color: colors.muted }]}>
-                {aiResult.status === 'no_violation'
-                  ? 'N/A (Compliant Traffic)'
-                  : aiResult.status === 'auto_rejected_low_clarity'
-                  ? 'Low Quality / Unreadable'
-                  : aiResult.status === 'rejected_vehicle_too_far'
-                  ? 'Vehicle Too Far'
-                  : 'Unreadable / Blurred'}
-              </Text>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[styles.detailVal, { color: colors.muted }]}>
+                  {aiResult.status === 'no_violation'
+                    ? 'N/A (Compliant Traffic)'
+                    : aiResult.status === 'auto_rejected_low_clarity'
+                    ? 'Low Quality / Unreadable'
+                    : aiResult.status === 'rejected_vehicle_too_far'
+                    ? 'Vehicle Too Far'
+                    : 'Unreadable / Blurred'}
+                </Text>
+                <TouchableOpacity onPress={() => setShowEditDetailsModal(true)} style={{ marginTop: 2 }}>
+                  <Text style={{ fontSize: 10, color: '#3b82f6', fontWeight: '700' }}>
+                    + {isUrdu ? 'پلیٹ درج کریں' : 'Add Plate Manually'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
 
@@ -518,16 +680,60 @@ export function ReportOutcome({
               <Car size={16} color={colors.telemetry} />
               <Text style={[styles.detailKey, { color: colors.muted }]}>Vehicle Info</Text>
             </View>
-            <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '600' }]}>
-              {aiResult.vehicleColor && aiResult.vehicleColor !== 'Unknown'
-                ? `${aiResult.vehicleColor} ${aiResult.vehicleMakeModel}`
-                : aiResult.vehicleMakeModel !== 'Not Identified'
-                ? aiResult.vehicleMakeModel
-                : aiResult.vehicleType !== 'Unknown'
-                ? aiResult.vehicleType
-                : 'Traffic Vehicle Identified'}
-            </Text>
+            {hasCitizenEdited && (citizenVehicleColor || citizenVehicleModel) ? (
+              <View style={{ alignItems: 'flex-end', flexShrink: 1, maxWidth: '65%' }}>
+                <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '700', textAlign: 'right' }]}>
+                  {[citizenVehicleColor, citizenVehicleModel].filter(Boolean).join(' ')}
+                </Text>
+                <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '600', marginTop: 1 }}>
+                  {citizenVehicleType} · {isUrdu ? 'شہری تفصیلات' : 'Citizen Specified'}
+                </Text>
+              </View>
+            ) : (
+              <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '600' }]}>
+                {aiResult.vehicleColor && aiResult.vehicleColor !== 'Unknown'
+                  ? `${aiResult.vehicleColor} ${aiResult.vehicleMakeModel}`
+                  : aiResult.vehicleMakeModel !== 'Not Identified'
+                  ? aiResult.vehicleMakeModel
+                  : aiResult.vehicleType !== 'Unknown'
+                  ? aiResult.vehicleType
+                  : 'Traffic Vehicle Identified'}
+              </Text>
+            )}
           </View>
+
+          {/* Violation Claim (if edited by citizen) */}
+          {hasCitizenEdited && (
+            <View style={styles.detailRow}>
+              <View style={styles.detailLeft}>
+                <Scale size={16} color={colors.telemetry} />
+                <Text style={[styles.detailKey, { color: colors.muted }]}>Reported Violation</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end', flexShrink: 1, maxWidth: '65%' }}>
+                <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '700', textAlign: 'right' }]}>
+                  {currentViolationName}
+                </Text>
+                <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '600', marginTop: 1 }}>
+                  {isUrdu ? 'شہری کی دعویٰ کردہ' : 'Citizen Stated Claim'}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Citizen Note for Officer (if provided) */}
+          {hasCitizenEdited && citizenNote ? (
+            <View style={[styles.detailRow, { flexDirection: 'column', alignItems: 'flex-start', gap: 6 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <FileText size={14} color={colors.telemetry} />
+                <Text style={[styles.detailKey, { color: colors.muted }]}>Citizen Note for Officer:</Text>
+              </View>
+              <View style={[styles.citizenNoteDisplayBox, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
+                <Text style={[styles.citizenNoteDisplayText, { color: colors.ink }]}>
+                  "{citizenNote}"
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* GPS Location & Place */}
           <View style={styles.detailRow}>
@@ -593,10 +799,8 @@ export function ReportOutcome({
       <Modal visible={selectedZoomIndex !== null} transparent animationType="fade" onRequestClose={() => setSelectedZoomIndex(null)}>
         {(() => {
           const activeIdx = selectedZoomIndex ?? 0;
-          const isVio =
-            aiResult.violationDetected &&
-            activeIdx === ((aiResult.violationFrameIndex ?? 2) - 1);
-          const tPct = activeIdx === 0 ? 30 : activeIdx === 1 ? 55 : 80;
+          const isVio = aiResult.violationDetected;
+          const tPct = frames.length === 1 ? 50 : activeIdx === 0 ? 35 : activeIdx === 1 ? 65 : 85;
           const customDesc = aiResult.frameDescriptions?.[activeIdx];
 
           return (
@@ -609,19 +813,19 @@ export function ReportOutcome({
                       <View
                         style={[
                           styles.lightboxFrameBadge,
-                          isVio && { backgroundColor: '#ef4444' },
+                          { backgroundColor: '#ef4444' },
                         ]}
                       >
                         <Text style={styles.lightboxFrameBadgeText}>
-                          {isVio
-                            ? `⚡ Frame ${activeIdx + 1} of ${frames.length} · VIOLATION`
-                            : `Frame ${activeIdx + 1} of ${frames.length}`}
+                          {isUrdu
+                            ? `⚡ فریم ${activeIdx + 1} از ${frames.length} · ثبوت`
+                            : `⚡ Frame ${activeIdx + 1} of ${frames.length} · VIOLATION`}
                         </Text>
                       </View>
                       <Text style={styles.lightboxTimelineText}>{tPct}% timeline</Text>
                     </View>
                     <Text style={styles.lightboxSub} numberOfLines={1}>
-                      {customDesc || (isVio ? 'Decisive evidence moment' : 'Traffic alignment frame')}
+                      {customDesc || (isUrdu ? 'خلاف ورزی کا تصدیقی ثبوت' : 'Decisive violation evidence keyframe')}
                     </Text>
                   </View>
                   <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedZoomIndex(null)} activeOpacity={0.7}>
@@ -753,6 +957,49 @@ export function ReportOutcome({
               Submit Case <Text style={{ color: colors.telemetry, fontWeight: '700' }}>{aiResult.caseId}</Text> for human police warden inspection.
             </Text>
 
+            {/* Officer Submission Details Preview */}
+            <View style={[styles.officerSubmissionPreview, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: colors.telemetry }}>
+                  {isUrdu ? 'وارڈن کو بھیجی جانے والی تفصیلات:' : 'DETAILS SENT TO WARDEN:'}
+                </Text>
+                <TouchableOpacity onPress={() => { setShowConfirmModal(false); setShowEditDetailsModal(true); }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>
+                    {isUrdu ? 'ترمیم ✏️' : 'Edit ✏️'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ gap: 4 }}>
+                <Text style={{ fontSize: 12, color: colors.ink }}>
+                  <Text style={{ color: colors.muted }}>Plate: </Text>
+                  <Text style={{ fontWeight: '700', fontFamily: 'monospace' }}>
+                    {citizenPlate || aiResult.plateNumber || (isUrdu ? 'دستی شناخت درکار' : 'Pending Warden Identification')}
+                  </Text>
+                  {hasCitizenEdited && citizenPlate ? (
+                    <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '700' }}> (Citizen Specified)</Text>
+                  ) : null}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.ink }}>
+                  <Text style={{ color: colors.muted }}>Vehicle: </Text>
+                  <Text style={{ fontWeight: '600' }}>
+                    {[citizenVehicleColor, citizenVehicleModel].filter(Boolean).join(' ') || aiResult.vehicleMakeModel || citizenVehicleType}
+                  </Text>
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.ink }}>
+                  <Text style={{ color: colors.muted }}>Violation Claim: </Text>
+                  <Text style={{ fontWeight: '600' }}>
+                    {currentViolationName}
+                  </Text>
+                </Text>
+                {citizenNote ? (
+                  <Text style={{ fontSize: 11, color: colors.muted, fontStyle: 'italic', marginTop: 2 }}>
+                    "{citizenNote}"
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+
             {/* Fee Breakdown Box */}
             <View style={[styles.breakdownBox, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
               <View style={styles.breakdownRow}>
@@ -789,6 +1036,226 @@ export function ReportOutcome({
                     <Text style={styles.confirmBtnText}>Pay PKR 100 & Submit</Text>
                   </>
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: Edit Evidence Details Modal */}
+      <Modal visible={showEditDetailsModal} transparent animationType="slide" onRequestClose={() => setShowEditDetailsModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.editDetailsModalCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+            {/* Header */}
+            <View style={styles.dialogHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <View style={[styles.dialogIconBox, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                  <Edit3 size={20} color="#3b82f6" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.dialogTitle, { color: colors.ink, marginBottom: 2 }]}>
+                    {t('citizenDetailsTitle')}
+                  </Text>
+                  <Text style={[styles.dialogSubText, { color: colors.muted }]} numberOfLines={2}>
+                    {t('citizenDetailsSubtitle')}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setShowEditDetailsModal(false)} style={styles.dialogCloseBtn}>
+                <X size={18} color={colors.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 430 }} contentContainerStyle={{ paddingBottom: 10 }}>
+              {/* Field 1: License Plate Number */}
+              <View style={styles.formGroup}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={[styles.formLabel, { color: colors.ink }]}>{t('licensePlateLabel')}</Text>
+                  {aiResult.plateNumber && (
+                    <TouchableOpacity onPress={() => setCitizenPlate(aiResult.plateNumber || '')}>
+                      <Text style={{ fontSize: 11, color: colors.telemetry, fontWeight: '600' }}>
+                        Use AI: {aiResult.plateNumber}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <TextInput
+                  style={[styles.formInput, { backgroundColor: colors.canvas, color: colors.ink, borderColor: colors.edge, fontFamily: 'monospace', fontSize: 16, letterSpacing: 1.5, fontWeight: '700' }]}
+                  value={citizenPlate}
+                  onChangeText={(val) => setCitizenPlate(val.toUpperCase())}
+                  placeholder={t('licensePlatePlaceholder')}
+                  placeholderTextColor={colors.muted}
+                  autoCapitalize="characters"
+                />
+                <Text style={[styles.formHint, { color: colors.muted }]}>
+                  {isUrdu ? 'اگر ویڈیو میں پلیٹ صاف نظر آ رہی ہو اور اے آئی شناخت نہ کر سکا ہو تو یہاں اصل رجسٹریشن نمبر لکھیں۔' : 'If license plate is visible in video and AI missed it, enter exact plate here.'}
+                </Text>
+              </View>
+
+              {/* Field 2: Vehicle Color */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: colors.ink }]}>{t('vehicleColorLabel')}</Text>
+                <TextInput
+                  style={[styles.formInput, { backgroundColor: colors.canvas, color: colors.ink, borderColor: colors.edge }]}
+                  value={citizenVehicleColor}
+                  onChangeText={setCitizenVehicleColor}
+                  placeholder="e.g. White, Black, Silver, Red..."
+                  placeholderTextColor={colors.muted}
+                />
+                {/* Color Quick Chips */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }} contentContainerStyle={{ gap: 6 }}>
+                  {['White', 'Black', 'Silver', 'Grey', 'Red', 'Blue', 'Yellow', 'Green'].map(col => (
+                    <TouchableOpacity
+                      key={col}
+                      style={[
+                        styles.chipPill,
+                        {
+                          backgroundColor: citizenVehicleColor.toLowerCase() === col.toLowerCase() ? '#3b82f6' : colors.canvas,
+                          borderColor: citizenVehicleColor.toLowerCase() === col.toLowerCase() ? '#3b82f6' : colors.edge,
+                        },
+                      ]}
+                      onPress={() => setCitizenVehicleColor(col)}
+                    >
+                      <Text
+                        style={[
+                          styles.chipPillText,
+                          { color: citizenVehicleColor.toLowerCase() === col.toLowerCase() ? '#fff' : colors.ink },
+                        ]}
+                      >
+                        {col}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Field 3: Vehicle Make & Model */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: colors.ink }]}>{t('vehicleModelLabel')}</Text>
+                <TextInput
+                  style={[styles.formInput, { backgroundColor: colors.canvas, color: colors.ink, borderColor: colors.edge }]}
+                  value={citizenVehicleModel}
+                  onChangeText={setCitizenVehicleModel}
+                  placeholder="e.g. Toyota Corolla, Honda Civic, Suzuki Alto, CD 70..."
+                  placeholderTextColor={colors.muted}
+                />
+                {/* Popular Models Chips */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }} contentContainerStyle={{ gap: 6 }}>
+                  {['Corolla', 'Civic', 'Alto', 'Yaris', 'City', 'CD 70', '125', 'Rickshaw'].map(mod => (
+                    <TouchableOpacity
+                      key={mod}
+                      style={[
+                        styles.chipPill,
+                        {
+                          backgroundColor: citizenVehicleModel.toLowerCase().includes(mod.toLowerCase()) ? '#3b82f6' : colors.canvas,
+                          borderColor: citizenVehicleModel.toLowerCase().includes(mod.toLowerCase()) ? '#3b82f6' : colors.edge,
+                        },
+                      ]}
+                      onPress={() => setCitizenVehicleModel(mod)}
+                    >
+                      <Text
+                        style={[
+                          styles.chipPillText,
+                          { color: citizenVehicleModel.toLowerCase().includes(mod.toLowerCase()) ? '#fff' : colors.ink },
+                        ]}
+                      >
+                        {mod}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Field 4: Vehicle Type */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: colors.ink }]}>{t('vehicleTypeLabel')}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                  {['Car', 'Motorcycle', 'Rickshaw', 'Commercial / Truck', 'Bus'].map(vt => (
+                    <TouchableOpacity
+                      key={vt}
+                      style={[
+                        styles.chipPill,
+                        {
+                          backgroundColor: citizenVehicleType === vt ? '#3b82f6' : colors.canvas,
+                          borderColor: citizenVehicleType === vt ? '#3b82f6' : colors.edge,
+                        },
+                      ]}
+                      onPress={() => setCitizenVehicleType(vt)}
+                    >
+                      <Text
+                        style={[
+                          styles.chipPillText,
+                          { color: citizenVehicleType === vt ? '#fff' : colors.ink },
+                        ]}
+                      >
+                        {vt}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Field 5: Violation Category */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: colors.ink }]}>{t('violationCategoryLabel')}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }} contentContainerStyle={{ gap: 6 }}>
+                  {VIOLATION_TAXONOMY.map(v => (
+                    <TouchableOpacity
+                      key={v.code}
+                      style={[
+                        styles.chipPill,
+                        {
+                          backgroundColor: citizenViolationType === v.code ? '#10b981' : colors.canvas,
+                          borderColor: citizenViolationType === v.code ? '#10b981' : colors.edge,
+                        },
+                      ]}
+                      onPress={() => setCitizenViolationType(v.code)}
+                    >
+                      <Text
+                        style={[
+                          styles.chipPillText,
+                          { color: citizenViolationType === v.code ? '#fff' : colors.ink },
+                        ]}
+                      >
+                        {v.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Field 6: Citizen Audit Note */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: colors.ink }]}>{t('citizenNoteLabel')}</Text>
+                <TextInput
+                  style={[styles.formTextArea, { backgroundColor: colors.canvas, color: colors.ink, borderColor: colors.edge }]}
+                  value={citizenNote}
+                  onChangeText={setCitizenNote}
+                  placeholder={t('citizenNotePlaceholder')}
+                  placeholderTextColor={colors.muted}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+            </ScrollView>
+
+            {/* Modal Actions */}
+            <View style={[styles.dialogBtnRow, { marginTop: 14 }]}>
+              <TouchableOpacity
+                style={[styles.cancelBtn, { borderColor: colors.edge }]}
+                onPress={() => setShowEditDetailsModal(false)}
+              >
+                <Text style={[styles.cancelBtnText, { color: colors.ink }]}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.confirmBtn, { backgroundColor: '#10b981' }]}
+                onPress={handleSaveCitizenDetails}
+              >
+                <Check size={16} color="#fff" />
+                <Text style={[styles.confirmBtnText, { color: '#fff' }]}>
+                  {t('saveDetailsBtn')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1525,5 +1992,105 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 14,
     fontWeight: '800',
+  },
+
+  // Manual Details Editor & Overrides Styles
+  editDetailsModalCard: {
+    width: '100%',
+    maxWidth: 390,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    padding: 18,
+  },
+  dialogSubText: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  formGroup: {
+    marginTop: 12,
+  },
+  formLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  formInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  formTextArea: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    minHeight: 64,
+    textAlignVertical: 'top',
+  },
+  formHint: {
+    fontSize: 10,
+    marginTop: 4,
+    lineHeight: 14,
+  },
+  chipPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  citizenAttachedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  attachDetailsPromptBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  editTelemetryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  citizenNoteDisplayBox: {
+    width: '100%',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 2,
+  },
+  citizenNoteDisplayText: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    lineHeight: 15,
+  },
+  officerSubmissionPreview: {
+    width: '100%',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12,
   },
 });
