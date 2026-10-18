@@ -7,6 +7,7 @@
     "app:ios": "npm --prefix app run ios",
     "app:android": "npm --prefix app run android",
     "dashboard": "npm --prefix dashboard dev",
-    "build:dashboard": "npm --prefix dashboard run build"
+    "build:dashboard": "npm --prefix dashboard run build",
+    "build:app": "npm --prefix app run build:web"
   }
 }

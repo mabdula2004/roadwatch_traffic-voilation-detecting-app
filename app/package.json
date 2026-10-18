@@ -6,7 +6,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "expo export --platform web --output-dir dist",
+    "test:api": "node --test tests/analyze.test.cjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -33,7 +35,9 @@
     "react-native-svg": "15.15.4",
     "react-native-url-polyfill": "^4.0.0",
     "react-router-dom": "^6.23.1",
-    "resolve-from": "^5.0.0"
+    "resolve-from": "^5.0.0",
+    "react-native-web": "0.21.4",
+    "@expo/metro-runtime": "~57.0.4"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

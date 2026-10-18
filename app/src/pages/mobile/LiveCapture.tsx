@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MapPin, Scan, Video } from 'lucide-react-native';
@@ -58,6 +59,7 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
   };
 
   async function start() {
+    if (Platform.OS === 'web') return;
     if (recordingNow.current) return;
     if (!permission?.granted || !micPermission?.granted) {
       const [cameraResult, micResult] = await Promise.all([askCamera(), askMic()]);
@@ -194,7 +196,7 @@ export function LiveCapture({ onCapture }: LiveCaptureProps) {
           <TouchableOpacity
             style={[styles.shutterButton, recording && styles.shutterButtonRecording]}
             onPress={recording ? handleStop : start}
-            disabled={preparing}
+            disabled={preparing || Platform.OS === 'web'}
             activeOpacity={0.8}
           >
             <Video size={28} color={recording ? Colors.signal : Colors.canvas} />

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Platform, StyleSheet, ActivityIndicator } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { supabase } from './src/lib/supabase';
 import type { CapturedClip } from './src/lib/report';
 import { Colors } from './src/constants/theme';
@@ -154,13 +155,20 @@ function MainApp() {
 
 export default function App() {
   return (
+    <SafeAreaProvider>
     <ThemeProvider>
       <LanguageProvider>
         <UserProvider>
-          <MainApp />
+          <View style={{flex: 1}}>
+            {Platform.OS === 'web' && <View style={{backgroundColor: '#102033', padding: 12}}>
+              <Text style={{color: '#cbd5e1', fontSize: 12}}>RoadWatch web preview · Video evidence recording requires the Android or iOS app.</Text>
+            </View>}
+            <MainApp />
+          </View>
         </UserProvider>
       </LanguageProvider>
     </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
 

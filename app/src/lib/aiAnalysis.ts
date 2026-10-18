@@ -1,3 +1,4 @@
+import { supabase } from './supabase';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
@@ -51,7 +52,7 @@ export interface AiEvidentiaryResult {
   isCitizenEdited?: boolean;
 }
 
-const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
+const AI_ENDPOINT = process.env.EXPO_PUBLIC_AI_ENDPOINT || (typeof window !== 'undefined' && window.location?.origin ? `${window.location.origin}/api/analyze` : '');
 const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen3-vl-8b-instruct';
 
 const COMPACT_VIOLATION_TAXONOMY =
@@ -231,12 +232,13 @@ async function callOpenRouterVision(
   maxTokens: number = 450
 ): Promise<{ ok: boolean; parsed?: any; is402?: boolean; error?: string }> {
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    if (!AI_ENDPOINT) return { ok: false, error: 'AI endpoint is not configured.' };
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return { ok: false, error: 'Sign in before submitting evidence.' };
+    const response = await fetch(AI_ENDPOINT, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'HTTP-Referer': 'https://roadwatch.app',
-        'X-OpenRouter-Title': 'RoadWatch Traffic AI',
+        'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
