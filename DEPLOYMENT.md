@@ -24,7 +24,7 @@ Set the following variables in the app project's intended deployment environment
 - Optional `AI_MODEL`: defaults to `qwen/qwen3-vl-8b-instruct`.
 - For native Android/iOS builds, set `EXPO_PUBLIC_AI_ENDPOINT` to `https://<app-deployment-domain>/api/analyze`. The browser uses its own origin automatically.
 
-The AI proxy verifies the Supabase access token, restricts the request payload, chooses its model and token cap on the server, and keeps provider credentials out of client bundles. Without a server key it responds with an explicit 503. Existing native two-stage analysis remains unchanged apart from transport through this endpoint.
+The API directory has an explicit ES-module package boundary so Vercel can load the compiled function without changing the mobile app build configuration. The AI proxy verifies the Supabase access token, restricts the request payload, chooses its model and token cap on the server, and keeps provider credentials out of client bundles. Without a server key it responds with an explicit 503. Existing native two-stage analysis remains unchanged apart from transport through this endpoint.
 
 The web version is a preview of the reporting application. Video recording, video thumbnail extraction and native evidence file handling are not supported by this preview. The record control is disabled in browsers. Use the Android/iOS app for evidence recording.
 
@@ -48,6 +48,17 @@ npm run build
 
 Build validation is separate from deployed end-to-end verification. SMS/email registration, native recording, real AI provider calls, officer authorization and Vercel routing must still be tested in their actual deployment environments.
 
-## Deployment access status
+## Production deployments — 18 October 2026
 
-The connected Vercel API returned `403 Forbidden` for the explicit `abdula5` team. Git-linked project creation also reported that a GitHub integration must be installed. No project was created and neither surface was published during this preparation. Deployment needs an account authorized for this team and a Vercel GitHub integration with repository access.
+Both projects were published under the `abdula5` team from uploaded source snapshots of this deployment branch. The browser dashboard created the projects; the API module fix was then deployed to the existing app project by its verified project ID.
+
+- Reporting application web preview: https://roadwatch-app-psi.vercel.app/
+- Officer dashboard: https://roadwatch-dashboard-eight.vercel.app/
+
+The reporting app's configured production deployment is `dpl_Ha2CYz15ujf9FwPib68uMjsdBXMG`. Its two public Supabase environment variables are saved for Production. The AI provider server key has not been supplied; AI analysis remains unavailable until a newly issued server key is configured.
+
+Both live frontends were opened and visually verified in the browser. This does not certify registration, native evidence capture, AI analysis or officer adjudication end to end. The dashboard's authentication/authorization limitations above remain relevant.
+
+These are direct upload deployments. They are not connected to automatic GitHub deployments. Future changes require a fresh source upload/redeployment, or an explicitly configured Vercel Git integration for this repository.
+
+Production HTTP checks passed: both frontends return 200; `/api/analyze` rejects GET with 405 and returns an explicit 503 for POST while the server provider key is absent. The previous module-loading 500 is resolved.
