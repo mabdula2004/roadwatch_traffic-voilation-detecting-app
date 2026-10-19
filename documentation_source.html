@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RoadWatch — Project Workflow & System Documentation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  @page {
+    size: A4;
+    margin: 18mm 16mm 18mm 16mm;
+    @bottom-center {
+      content: "RoadWatch Ecosystem Specification • Confidential & Proprietary";
+      font-family: 'Inter', sans-serif;
+      font-size: 8pt;
+      color: #94a3b8;
+    }
+    @bottom-right {
+      content: "Page " counter(page);
+      font-family: 'Inter', sans-serif;
+      font-size: 8pt;
+      font-weight: 600;
+      color: #64748b;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #1e293b;
+    background-color: #ffffff;
+    line-height: 1.55;
+    font-size: 9.5pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .page-break {
+    page-break-before: always;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid;
+  }
+
+  /* Cover Page */
+  .cover-page {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 30px 20px 20px 20px;
+    background: linear-gradient(145deg, #0f172a 0%, #1e293b 60%, #090d16 100%);
+    color: #ffffff;
+    border-radius: 8px;
+    page-break-after: always;
+  }
+
+  .cover-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    padding-bottom: 20px;
+  }
+
+  .cover-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 8.5pt;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .cover-version {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9pt;
+    color: #94a3b8;
+  }
+
+  .cover-center {
+    margin-top: 40px;
+  }
+
+  .cover-title {
+    font-size: 34pt;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1.15;
+    background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 50%, #38bdf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 14px;
+  }
+
+  .cover-subtitle {
+    font-size: 14pt;
+    font-weight: 400;
+    color: #94a3b8;
+    max-width: 600px;
+    line-height: 1.45;
+    margin-bottom: 30px;
+  }
+
+  .cover-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-top: 25px;
+  }
+
+  .cover-metric {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 14px;
+  }
+
+  .cover-metric-value {
+    font-size: 16pt;
+    font-weight: 700;
+    color: #38bdf8;
+    margin-bottom: 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .cover-metric-label {
+    font-size: 8pt;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .cover-bottom {
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding-top: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .cover-meta-item {
+    font-size: 8.5pt;
+    color: #94a3b8;
+    margin-bottom: 3px;
+  }
+
+  .cover-meta-item strong {
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  /* Content Headings */
+  h1 {
+    font-size: 18pt;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.5px;
+    margin-top: 24px;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h1 .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: #0f172a;
+    color: #38bdf8;
+    border-radius: 6px;
+    font-size: 11pt;
+  }
+
+  h2 {
+    font-size: 13pt;
+    font-weight: 700;
+    color: #1e293b;
+    margin-top: 18px;
+    margin-bottom: 8px;
+    letter-spacing: -0.3px;
+  }
+
+  h3 {
+    font-size: 10.5pt;
+    font-weight: 600;
+    color: #334155;
+    margin-top: 12px;
+    margin-bottom: 6px;
+  }
+
+  p {
+    margin-bottom: 10px;
+    color: #334155;
+  }
+
+  /* Callouts & Alert Boxes */
+  .callout {
+    background: #f8fafc;
+    border-left: 4px solid #38bdf8;
+    border-radius: 0 6px 6px 0;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 9pt;
+  }
+
+  .callout.success {
+    background: #f0fdf4;
+    border-left-color: #10b981;
+    color: #166534;
+  }
+
+  .callout.warning {
+    background: #fffbeb;
+    border-left-color: #f59e0b;
+    color: #92400e;
+  }
+
+  .callout.info {
+    background: #f0f9ff;
+    border-left-color: #0284c7;
+    color: #0369a1;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 16px 0;
+    font-size: 8.5pt;
+    background: #ffffff;
+  }
+
+  th {
+    background: #f1f5f9;
+    color: #0f172a;
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e1;
+    text-transform: uppercase;
+    font-size: 7.5pt;
+    letter-spacing: 0.5px;
+  }
+
+  td {
+    padding: 7px 10px;
+    border: 1px solid #e2e8f0;
+    color: #334155;
+    vertical-align: top;
+  }
+
+  tr:nth-child(even) td {
+    background: #f8fafc;
+  }
+
+  /* Badge Components */
+  .badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 7.5pt;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .badge-blue { background: #e0f2fe; color: #0369a1; }
+  .badge-green { background: #dcfce7; color: #15803d; }
+  .badge-amber { background: #fef3c7; color: #b45309; }
+  .badge-purple { background: #f3e8ff; color: #7e22ce; }
+  .badge-red { background: #fee2e2; color: #b91c1c; }
+
+  /* Diagram Flow Cards */
+  .flow-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 14px 0;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  }
+
+  .step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 26px;
+    background: #0f172a;
+    color: #ffffff;
+    font-weight: 700;
+    border-radius: 50%;
+    font-size: 8.5pt;
+    margin-top: 2px;
+  }
+
+  .step-content {
+    flex: 1;
+  }
+
+  .step-title {
+    font-weight: 700;
+    color: #0f172a;
+    font-size: 9.5pt;
+    margin-bottom: 3px;
+  }
+
+  .step-desc {
+    color: #475569;
+    font-size: 8.5pt;
+    line-height: 1.45;
+  }
+
+  .step-tags {
+    display: flex;
+    gap: 6px;
+    margin-top: 5px;
+  }
+
+  /* Roles Grid */
+  .roles-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin: 12px 0 16px 0;
+  }
+
+  .role-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    background: #ffffff;
+  }
+
+  .role-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 6px;
+    margin-bottom: 8px;
+  }
+
+  .role-title {
+    font-weight: 700;
+    font-size: 9.5pt;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .role-list {
+    list-style: none;
+    font-size: 8.2pt;
+    color: #475569;
+  }
+
+  .role-list li {
+    margin-bottom: 4px;
+    position: relative;
+    padding-left: 14px;
+  }
+
+  .role-list li::before {
+    content: "•";
+    position: absolute;
+    left: 4px;
+    color: #0284c7;
+    font-weight: bold;
+  }
+
+  /* Architecture Box */
+  .arch-box {
+    background: #0f172a;
+    color: #f8fafc;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 14px 0;
+  }
+
+  .arch-title {
+    font-size: 11pt;
+    font-weight: 700;
+    color: #38bdf8;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 6px;
+  }
+
+  .arch-columns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .arch-col {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 10px;
+  }
+
+  .arch-col-title {
+    font-size: 9pt;
+    font-weight: 600;
+    color: #34d399;
+    margin-bottom: 6px;
+  }
+
+  .arch-col-desc {
+    font-size: 7.8pt;
+    color: #cbd5e1;
+    line-height: 1.4;
+  }
+
+  /* Code / Monospace snippet */
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8pt;
+    background: #f1f5f9;
+    padding: 2px 5px;
+    border-radius: 3px;
+    color: #0f172a;
+    border: 1px solid #e2e8f0;
+  }
+
+  ul, ol {
+    margin-left: 18px;
+    margin-bottom: 10px;
+  }
+
+  li {
+    margin-bottom: 4px;
+    color: #334155;
+  }
+</style>
+</head>
+<body>
+
+  <!-- COVER PAGE -->
+  <div class="cover-page">
+    <div class="cover-top">
+      <div class="cover-badge">
+        <span>🛡️ Official System Documentation</span>
+      </div>
+      <div class="cover-version">DOC-VER: 2026.10 • PRODUCTION</div>
+    </div>
+
+    <div class="cover-center">
+      <div class="cover-title">ROADWATCH</div>
+      <div class="cover-subtitle">
+        Civic Traffic Enforcement & Cryptographic Evidence Verification Ecosystem
+      </div>
+      <p style="color: #94a3b8; font-size: 9.5pt; max-width: 580px; line-height: 1.5;">
+        A comprehensive technical and operational blueprint detailing multi-role permissions, high-trust video capture pipelines, real-time cloud synchronization, and human-in-the-loop police adjudication workflows.
+      </p>
+
+      <div class="cover-grid">
+        <div class="cover-metric">
+          <div class="cover-metric-value">100%</div>
+          <div class="cover-metric-label">Human-in-the-Loop Verification</div>
+        </div>
+        <div class="cover-metric">
+          <div class="cover-metric-value">&lt; 500ms</div>
+          <div class="cover-metric-label">Realtime WebSocket Sync</div>
+        </div>
+        <div class="cover-metric">
+          <div class="cover-metric-value">SHA-256</div>
+          <div class="cover-metric-label">Cryptographic Privacy Hashing</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cover-bottom">
+      <div>
+        <div class="cover-meta-item"><strong>Target Platform:</strong> Citizen Mobile App (Expo) • Officer Command Web Portal (ReactJS)</div>
+        <div class="cover-meta-item"><strong>Backend Services:</strong> Supabase Cloud • PostgreSQL • Evidence Vault S3</div>
+        <div class="cover-meta-item"><strong>Target Jurisdiction:</strong> Municipal Traffic Police Departments & Citizen Observers</div>
+      </div>
+      <div style="text-align: right;">
+        <div class="cover-meta-item"><strong>Date:</strong> October 2026</div>
+        <div class="cover-meta-item"><strong>Status:</strong> Approved Production Architecture</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABLE OF CONTENTS & EXECUTIVE SUMMARY -->
+  <div class="page-break"></div>
+
+  <h1><span class="icon">📑</span> Document Structure & Executive Summary</h1>
+
+  <h2>Table of Contents</h2>
+  <table style="margin-top: 6px;">
+    <thead>
+      <tr>
+        <th style="width: 15%;">Section</th>
+        <th style="width: 65%;">Title / Domain</th>
+        <th style="width: 20%;">Focus Area</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Section 1</strong></td>
+        <td>Executive Summary & The Civic Challenge</td>
+        <td>Problem statement & mission</td>
+      </tr>
+      <tr>
+        <td><strong>Section 2</strong></td>
+        <td>Ecosystem User Roles & Personas</td>
+        <td>Citizen, Officer, Auditor, Violator</td>
+      </tr>
+      <tr>
+        <td><strong>Section 3</strong></td>
+        <td>Role-Based Access Control (RBAC) Matrix</td>
+        <td>Security permissions & visibility</td>
+      </tr>
+      <tr>
+        <td><strong>Section 4</strong></td>
+        <td>End-to-End Operational Workflow (5 Stages)</td>
+        <td>Capture, AI, Cloud, Audit, Reward</td>
+      </tr>
+      <tr>
+        <td><strong>Section 5</strong></td>
+        <td>Subsystem Technical Architecture</td>
+        <td>Mobile, Dashboard & Supabase Core</td>
+      </tr>
+      <tr>
+        <td><strong>Section 6</strong></td>
+        <td>Database Schema & Evidence Vault Specification</td>
+        <td>Postgres tables & RLS policies</td>
+      </tr>
+      <tr>
+        <td><strong>Section 7</strong></td>
+        <td>Privacy, Integrity & Anti-Fraud Engine</td>
+        <td>Trust score, CNIC hash, GPS stamp</td>
+      </tr>
+      <tr>
+        <td><strong>Section 8</strong></td>
+        <td>Dispute & Appeal Workflow Protocol</td>
+        <td>Contestation with PKR 100 bond</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>1. Executive Summary & Problem Statement</h2>
+  <p>
+    Modern metropolitan roads suffer from an alarming rate of traffic violations—including signal jumping, illegal wrong-way navigation, commercial lane blockage, and hazardous driving—that overwhelm municipal traffic police departments. Traditional fixed-camera CCTV infrastructures suffer from high capital expenditure, widespread blind spots, and vulnerability to occlusion.
+  </p>
+  <p>
+    <strong>RoadWatch</strong> solves this dilemma by turning verified citizens into active observers. Instead of relying on unreliable, unverified social media complaints or fallible autonomous AI fines, RoadWatch establishes a <strong>high-integrity, human-in-the-loop verification pipeline</strong>. Citizens safely capture 10-second violation clips; the client extracts multi-angle keyframes and stamps immutable GPS/orientation telemetry; Vision AI models assist with vehicle and license plate recognition; and certified Traffic Enforcement Officers review the evidence on a zero-latency web portal before any official legal citation is sanctioned.
+  </p>
+
+  <div class="callout success avoid-break">
+    <strong>Core Architectural Guarantee: Human-in-the-Loop Adjudication</strong><br>
+    In compliance with constitutional due process and evidence admissibility standards, <strong>no automated fine is ever generated solely by Artificial Intelligence</strong>. The Vision AI serves strictly as an assistive parser; every citation requires the explicit review and digital signature of an authorized Traffic Enforcement Officer.
+  </div>
+
+  <!-- SECTION 2: ROLES & PERSONAS -->
+  <div class="page-break"></div>
+
+  <h1><span class="icon">👥</span> Ecosystem User Roles & Personas</h1>
+  <p>
+    The RoadWatch ecosystem operates on four clearly segmented human personas and one autonomous background engine. Each role possesses strict operational boundaries and security limits.
+  </p>
+
+  <div class="roles-grid avoid-break">
+    <div class="role-card">
+      <div class="role-header">
+        <span class="role-title">📱 1. Citizen Reporter</span>
+        <span class="badge badge-blue">Role: reporter</span>
+      </div>
+      <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
+        Registered everyday pedestrians, commuters, and vehicle passengers utilizing the Expo mobile app.
+      </p>
+      <ul class="role-list">
+        <li>Registers with Phone OTP & 13-digit Pakistani CNIC (SHA-256 hashed).</li>
+        <li>Launches 10-second Camera HUD with live GPS and sensor stamping.</li>
+        <li>Reviews and corrects AI-extracted license plates and claims.</li>
+        <li>Monitors personal submissions in the sealed Evidence Vault.</li>
+        <li>Earns civic bounty payouts (PKR) into the digital reward wallet.</li>
+        <li>Posts PKR 100 refundable appeal bonds on contested rejections.</li>
+        <li>Triggers emergency SOS quick-dial (Rescue 1122 / Police 15).</li>
+      </ul>
+    </div>
+
+    <div class="role-card">
+      <div class="role-header">
+        <span class="role-title">👮 2. Traffic Police Officer</span>
+        <span class="badge badge-green">Role: officer</span>
+      </div>
+      <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
+        Certified municipal enforcement personnel stationed at command review desks on the web portal.
+      </p>
+      <ul class="role-list">
+        <li>Receives real-time incoming violations via zero-latency WebSockets.</li>
+        <li>Streams in-browser MP4 videos directly from the secure Evidence Vault.</li>
+        <li>Examines 3 high-resolution extracted keyframes for plate legibility.</li>
+        <li>Cross-checks satellite GPS coordinates, timestamp, and reporter notes.</li>
+        <li>Executes 1-click <code>Accept</code> (issues fine, credits wallet, boosts score).</li>
+        <li>Executes 1-click <code>Reject</code> with reason tag (penalizes fake reports).</li>
+        <li>Utilizes rapid keyboard hotkeys (<code>A</code>, <code>R</code>, <code>Space</code>, <code>J</code>, <code>K</code>).</li>
+      </ul>
+    </div>
+
+    <div class="role-card">
+      <div class="role-header">
+        <span class="role-title">🔍 3. Enforcement Supervisor</span>
+        <span class="badge badge-purple">Role: auditor / admin</span>
+      </div>
+      <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
+        Senior traffic police superintendents and legal auditors managing department integrity.
+      </p>
+      <ul class="role-list">
+        <li>Conducts secondary hearings on Citizen Dispute Appeals.</li>
+        <li>Audits closed citations with date-range, plate, and officer filters.</li>
+        <li>Generates and exports legal CSV logs for court evidence filing.</li>
+        <li>Monitors the Citizen Reporter Registry & trust reputation metrics.</li>
+        <li>Identifies malicious or spam reporters and flags accounts for suspension.</li>
+        <li>Inspects departmental SLA compliance and officer throughput.</li>
+      </ul>
+    </div>
+
+    <div class="role-card">
+      <div class="role-header">
+        <span class="role-title">🚗 4. Vehicle Offender</span>
+        <span class="badge badge-amber">Role: offender</span>
+      </div>
+      <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
+        The registered vehicle owner or driver committing infractions on public thoroughfares.
+      </p>
+      <ul class="role-list">
+        <li>Subject of legal traffic citations resulting from accepted reports.</li>
+        <li>Protected by constitutional human-in-the-loop audit safeguards.</li>
+        <li>Receives official citations containing authenticated video & keyframe proof.</li>
+        <li>Retains standard municipal statutory rights of appeal in traffic court.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Role-Based Access Control (RBAC) Matrix</h2>
+  <table class="avoid-break">
+    <thead>
+      <tr>
+        <th>Operational Capability</th>
+        <th>Citizen (`reporter`)</th>
+        <th>Officer (`officer`)</th>
+        <th>Supervisor (`auditor`)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Record & Submit 10s Evidence</strong></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-red">DENY</span></td>
+      </tr>
+      <tr>
+        <td><strong>Access Personal Evidence Vault</strong></td>
+        <td><span class="badge badge-green">OWN RECORDS ONLY</span></td>
+        <td><span class="badge badge-blue">ALL PENDING</span></td>
+        <td><span class="badge badge-blue">ALL HISTORICAL</span></td>
+      </tr>
+      <tr>
+        <td><strong>Earn & Withdraw Civic Bounty (PKR)</strong></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-red">DENY</span></td>
+      </tr>
+      <tr>
+        <td><strong>Realtime Pending Queue Ingestion</strong></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+      </tr>
+      <tr>
+        <td><strong>Accept / Reject Legal Citation</strong></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+      </tr>
+      <tr>
+        <td><strong>File Contested Dispute Appeal</strong></td>
+        <td><span class="badge badge-green">ALLOW (PKR 100)</span></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-red">DENY</span></td>
+      </tr>
+      <tr>
+        <td><strong>Adjudicate Citizen Appeals</strong></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-green">ALLOW (FINAL)</span></td>
+      </tr>
+      <tr>
+        <td><strong>Export Audit Records to CSV</strong></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+      </tr>
+      <tr>
+        <td><strong>Suspend Abusive Reporter Accounts</strong></td>
+        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-amber">FLAG ONLY</span></td>
+        <td><span class="badge badge-green">ALLOW</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- SECTION 4: END-TO-END WORKFLOW -->
+  <div class="page-break"></div>
+
+  <h1><span class="icon">🔄</span> End-to-End Operational Workflow</h1>
+  <p>
+    The lifecycle of a traffic violation report traverses five distinct stages, transitioning seamlessly from native mobile hardware capture to cloud analysis, officer adjudication, and financial reconciliation.
+  </p>
+
+  <div class="flow-container avoid-break">
+    <div class="flow-step">
+      <div class="step-number">1</div>
+      <div class="step-content">
+        <div class="step-title">Stage 1: Citizen Mobile Capture & Hardware Stamping</div>
+        <div class="step-desc">
+          The citizen launches the native Camera HUD. The application enforces a strict <strong>10-second recording limiter</strong> (with a 50MB ceiling) to preserve focused evidence. Concurrently, the mobile device samples high-precision GPS coordinates, capture timestamp, and gyro orientation angles. Immediately upon recording termination, the app extracts <strong>3 multi-angle keyframes</strong> (<code>frame_1.jpg</code>, <code>frame_2.jpg</code>, <code>frame_3.jpg</code>) via video thumbnailing algorithms.
+        </div>
+        <div class="step-tags">
+          <span class="badge badge-blue">Hardware HUD</span>
+          <span class="badge badge-blue">GPS Stamping</span>
+          <span class="badge badge-purple">3x Keyframes</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-number">2</div>
+      <div class="step-content">
+        <div class="step-title">Stage 2: Vision AI Inference & Pre-Screening</div>
+        <div class="step-desc">
+          Extracted keyframes are processed through Vision AI inference models. The model identifies the vehicle category (Car, Motorcycle, Commercial Bus, Rickshaw, Heavy Truck), classifies violation categories (Red Light, Wrong-Way, Illegal Parking, Triple Riding, Helmet Violation), and performs Optical Character Recognition (OCR) on vehicle registration plates. The citizen reviews the AI prediction and attaches contextual notes.
+        </div>
+        <div class="step-tags">
+          <span class="badge badge-purple">Vehicle Classifier</span>
+          <span class="badge badge-purple">Plate OCR</span>
+          <span class="badge badge-blue">Confidence Score</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-number">3</div>
+      <div class="step-content">
+        <div class="step-title">Stage 3: Secure Cloud Ingestion & Evidence Vault Storage</div>
+        <div class="step-desc">
+          A unique RFC4122 v4 UUID is generated as the <code>client_capture_id</code>. The MP4 video file and JPEG keyframes are transmitted over encrypted TLS to Supabase Storage's private <code>evidence_vault</code> bucket. An atomic transaction inserts metadata into <code>public.reports</code> with initial status <code>pending_manual_review</code>. Supabase's Realtime engine broadcasts the new insertion event across WebSocket channels.
+        </div>
+        <div class="step-tags">
+          <span class="badge badge-amber">UUID v4</span>
+          <span class="badge badge-green">evidence_vault (S3)</span>
+          <span class="badge badge-blue">WebSocket Broadcast</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-number">4</div>
+      <div class="step-content">
+        <div class="step-title">Stage 4: Officer Command Verification & Adjudication</div>
+        <div class="step-desc">
+          The report instantly populates the Officer Command Dashboard's Live Pending Queue without page refresh. Cases are prioritized by severity (CRITICAL for Red Light/Wrong Way, HIGH for Reckless Driving). The officer opens the integrated Evidence Stage, plays the full MP4 video, toggles between high-res keyframes, and verifies the plate and GPS location. The officer adjudicates via hotkeys:
+          <br>• <strong>Accept Citation (<code>A</code>):</strong> Marks report <code>approved</code>, schedules official e-challan, credits citizen bounty (PKR 250), increments citizen Trust Score (+2).
+          <br>• <strong>Reject Citation (<code>R</code>):</strong> Dismisses report with reason tag. If deemed fraudulent, penalizes citizen Trust Score (-15).
+        </div>
+        <div class="step-tags">
+          <span class="badge badge-green">Hotkeys: A / R</span>
+          <span class="badge badge-blue">In-Browser Player</span>
+          <span class="badge badge-amber">Trust Score Logic</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-number">5</div>
+      <div class="step-content">
+        <div class="step-title">Stage 5: Citizen Dispute Appeal & Escalation Protocol</div>
+        <div class="step-desc">
+          If an honest citizen's submission is rejected, they are notified with the officer's reason. The citizen can initiate a formal <strong>Dispute Appeal</strong> by depositing a <strong>PKR 100 refundable bond</strong> and providing written contestation. The report transitions to <code>pending_manual_review</code> under the dashboard's "Disputed Cases" tab for supervisor audit. If the rejection is overturned, the PKR 100 deposit is refunded, the bounty is awarded, and the trust penalty is reversed.
+        </div>
+        <div class="step-tags">
+          <span class="badge badge-red">PKR 100 Deposit</span>
+          <span class="badge badge-purple">Supervisor Hearing</span>
+          <span class="badge badge-green">Bond Refund</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 5: SUBSYSTEM ARCHITECTURE -->
+  <div class="page-break"></div>
+
+  <h1><span class="icon">🏛️</span> Subsystem Technical Architecture</h1>
+
+  <div class="arch-box avoid-break">
+    <div class="arch-title">ROADWATCH DISTRIBUTED ARCHITECTURE</div>
+    <div class="arch-columns">
+      <div class="arch-col">
+        <div class="arch-col-title">📱 CITIZEN MOBILE APP</div>
+        <div class="arch-col-desc">
+          • <strong>Framework:</strong> React Native 0.86, Expo 57, React 19.<br>
+          • <strong>Key Modules:</strong> Camera HUD, Orientation Sensor, Location Provider, Video Thumbnails.<br>
+          • <strong>Security:</strong> Crypto SHA-256 CNIC Hashing, AsyncStorage session caching.<br>
+          • <strong>Features:</strong> Sealed Vault, Civic Reward Wallet, Safety SOS 1122/15.
+        </div>
+      </div>
+
+      <div class="arch-col">
+        <div class="arch-col-title">⚡ SUPABASE CLOUD CORE</div>
+        <div class="arch-col-desc">
+          • <strong>Database:</strong> PostgreSQL with Row-Level Security (RLS).<br>
+          • <strong>Storage:</strong> <code>evidence_vault</code> private bucket (MP4 & JPEG).<br>
+          • <strong>Sync:</strong> Realtime WebSocket engine (`postgres_changes`).<br>
+          • <strong>Logic:</strong> Pl/pgSQL triggers for trust scoring and wallet balances.
+        </div>
+      </div>
+
+      <div class="arch-col">
+        <div class="arch-col-title">🖥️ OFFICER WEB PORTAL</div>
+        <div class="arch-col-desc">
+          • <strong>Framework:</strong> Pure ReactJS (100% JSX/JS), Vite 6, Tailwind CSS.<br>
+          • <strong>Architecture:</strong> Zero TypeScript/RN bridges for maximum desktop FPS.<br>
+          • <strong>Features:</strong> Live Queue, Evidence Stage, Appeals Room, CSV Exporter.<br>
+          • <strong>Productivity:</strong> Full keyboard shortcuts (`A`, `R`, `Space`, `J`, `K`).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Database Schema & Data Models</h2>
+  <table class="avoid-break">
+    <thead>
+      <tr>
+        <th style="width: 22%;">Table Name</th>
+        <th style="width: 38%;">Primary Fields</th>
+        <th style="width: 40%;">Purpose & RLS Policy</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>public.base_users</code></td>
+        <td><code>id (uuid)</code>, <code>phone</code>, <code>cnic_last4</code>, <code>cnic_hash</code>, <code>role</code></td>
+        <td>Identity records. Citizens can read own profile; Officers have read-only audit access.</td>
+      </tr>
+      <tr>
+        <td><code>public.reporter_profiles</code></td>
+        <td><code>user_id</code>, <code>trust_score</code>, <code>total_reports</code>, <code>status</code></td>
+        <td>Citizen reputation tracking. Trust score (0–100) automatically updated via DB triggers.</td>
+      </tr>
+      <tr>
+        <td><code>public.reports</code></td>
+        <td><code>id</code>, <code>client_capture_id</code>, <code>plate_number</code>, <code>violation_type</code>, <code>status</code>, <code>gps_lat</code>, <code>gps_lng</code></td>
+        <td>Primary violations table. Citizens can insert and view own reports; Officers have full update authority.</td>
+      </tr>
+      <tr>
+        <td><code>public.evidence</code></td>
+        <td><code>id</code>, <code>report_id</code>, <code>file_path</code>, <code>file_size</code>, <code>media_type</code></td>
+        <td>Metadata referencing MP4 video files and JPEG keyframes stored in <code>evidence_vault</code>.</td>
+      </tr>
+      <tr>
+        <td><code>public.reward_wallets</code></td>
+        <td><code>user_id</code>, <code>balance_pkr</code>, <code>pending_clearance</code></td>
+        <td>Citizen bounty balances. Modified exclusively via authenticated triggers upon citation approval.</td>
+      </tr>
+      <tr>
+        <td><code>public.fines</code></td>
+        <td><code>id</code>, <code>report_id</code>, <code>amount_pkr</code>, <code>citation_code</code></td>
+        <td>Official traffic citations issued to offending vehicles post-officer verification.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- SECTION 7: INTEGRITY & SECURITY -->
+  <div class="page-break"></div>
+
+  <h1><span class="icon">🛡️</span> Privacy, Integrity & Anti-Fraud Engine</h1>
+
+  <h2>1. Privacy-Preserving Citizen Identity (NADRA CNIC Digest)</h2>
+  <p>
+    To safeguard citizen reporters against retaliation, RoadWatch enforces strict privacy standards. The mobile application never stores 13-digit National Identity Card (CNIC) numbers in plaintext on device storage or databases.
+  </p>
+  <ul>
+    <li>The raw CNIC is converted client-side into an HMAC-salted <strong>SHA-256 cryptographic digest</strong> before transmission.</li>
+    <li>Only the <strong>last four digits</strong> (e.g. <code>•••••-•••••••-7412</code>) are preserved for citizen account reference.</li>
+    <li>This ensures irreversible identity hashing, completely preventing identity theft or unauthorized police lookup of reporting citizens.</li>
+  </ul>
+
+  <h2>2. Dynamic Trust Score & Anti-Spam Game Theory</h2>
+  <p>
+    To counteract the classic vulnerability of crowd-sourced platforms—false reports, prank submissions, and grudge filings—RoadWatch deploys an automated <strong>Dynamic Trust Scoring Engine</strong>:
+  </p>
+
+  <table class="avoid-break">
+    <thead>
+      <tr>
+        <th>Event Condition</th>
+        <th>Score Adjustment</th>
+        <th>System Consequence</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>New Citizen Registration</strong></td>
+        <td><span class="badge badge-blue">Baseline: 50 pts</span></td>
+        <td>Standard review priority; standard submission limits.</td>
+      </tr>
+      <tr>
+        <td><strong>Officer Accepts Valid Violation</strong></td>
+        <td><span class="badge badge-green">+2 pts</span></td>
+        <td>Bounty credited (PKR 250); reputation elevated towards High-Trust tier.</td>
+      </tr>
+      <tr>
+        <td><strong>Officer Rejects Inconclusive/Blurry</strong></td>
+        <td><span class="badge badge-amber">0 pts (Neutral)</span></td>
+        <td>No penalty applied; educational feedback provided to reporter.</td>
+      </tr>
+      <tr>
+        <td><strong>Officer Rejects Malicious / Fake Claim</strong></td>
+        <td><span class="badge badge-red">-15 pts</span></td>
+        <td>Substantial penalty; account flagged for supervisor review.</td>
+      </tr>
+      <tr>
+        <td><strong>Trust Score Drops Below 20 pts</strong></td>
+        <td><span class="badge badge-red">AUTOMATIC SUSPENSION</span></td>
+        <td>Submission privileges revoked; requires manual appeal to reinstate.</td>
+      </tr>
+      <tr>
+        <td><strong>Trust Score Reaches 85+ pts</strong></td>
+        <td><span class="badge badge-purple">FAST-TRACK TIER</span></td>
+        <td>Expedited review queue placement; eligible for civic reward multipliers.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>3. Hardware-Bound Evidence Integrity</h2>
+  <ul>
+    <li><strong>UUID v4 Evidence Keys:</strong> Submissions are tagged with cryptographically generated RFC4122 v4 UUIDs, preventing collision or spoofing.</li>
+    <li><strong>Location Fencing:</strong> GPS satellite coordinates and compass headings are sampled exclusively during the active 10-second capture window and permanently stamped to the evidence packet.</li>
+    <li><strong>Immutable Storage Vault:</strong> Storage objects in <code>evidence_vault</code> are write-once and can only be deleted or altered by database administrator roles.</li>
+  </ul>
+
+  <div class="callout info avoid-break">
+    <strong>Summary of Document Purpose:</strong><br>
+    This technical document establishes the baseline architecture, security controls, and operational guidelines for the RoadWatch traffic enforcement platform. For system deployment, execute the migration scripts located in <code>server/supabase/migrations/</code> and consult the project repository.
+  </div>
+
+</body>
+</html>
