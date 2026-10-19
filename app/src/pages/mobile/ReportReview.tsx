@@ -896,9 +896,19 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
         </TouchableOpacity>
 
         {/* Action 2: Remake / Retake Video */}
-        <TouchableOpacity style={styles.remakeFullBtn} onPress={handleRemakeVideo} disabled={submitting}>
-          <RotateCcw size={16} color={colors.ink} />
-          <Text style={[styles.remakeFullBtnText, { color: colors.ink }]}>
+        <TouchableOpacity
+          style={[
+            styles.remakeFullBtn,
+            {
+              backgroundColor: 'rgba(239, 68, 68, 0.08)',
+              borderColor: 'rgba(239, 68, 68, 0.35)',
+            },
+          ]}
+          onPress={handleRemakeVideo}
+          disabled={submitting}
+        >
+          <RotateCcw size={16} color="#ef4444" />
+          <Text style={[styles.remakeFullBtnText, { color: '#ef4444' }]}>
             {isUrdu ? 'ویڈیو مسترد کریں اور نئی ویڈیو بنائیں' : 'Discard & Remake Video'}
           </Text>
         </TouchableOpacity>
@@ -1592,6 +1602,7 @@ const styles = StyleSheet.create({
   remakeFullBtnText: {
     fontSize: 14,
     fontWeight: '700',
+    color: '#ef4444',
   },
   footerNote: {
     textAlign: 'center',

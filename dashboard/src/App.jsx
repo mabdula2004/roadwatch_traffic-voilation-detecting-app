@@ -78,6 +78,7 @@ export function App() {
           plateNumber: r.plate_number || r.vehicle_plate || 'LEA-4471',
           violationType: r.claimed_class || 'traffic_violation',
           violationName: vInfo.name,
+          reporterId: r.reporter_id,
           reporterName: userMap.get(r.reporter_id) || 'Verified Citizen',
           reporterTrust: 95,
           city: 'Lahore',
@@ -164,6 +165,27 @@ export function App() {
     [filteredCases]
   );
 
+  // Helper to recompute & update reporter's trust score in Supabase
+  const syncReporterTrustScore = async (reporterId) => {
+    if (!reporterId) return;
+    try {
+      const { data: repReports } = await supabase
+        .from('reports')
+        .select('status')
+        .eq('reporter_id', reporterId)
+        .in('status', ['accepted', 'approved', 'rejected']);
+
+      if (repReports && repReports.length > 0) {
+        const approved = repReports.filter((r) => r.status === 'accepted' || r.status === 'approved').length;
+        const newScore = Math.max(0, Math.min(100, Math.round((approved / repReports.length) * 100)));
+        await supabase
+          .from('reporter_profiles')
+          .update({ trust_score: newScore })
+          .eq('reporter_id', reporterId);
+      }
+    } catch { }
+  };
+
   // Officer Action: Approve Violation
   const handleApproveCase = async (caseItem, note) => {
     setIsProcessing(true);
@@ -179,7 +201,10 @@ export function App() {
         })
         .eq('report_id', caseItem.reportId);
 
-      // 2. Credit citizen wallet: PKR 100 review refund + PKR 200 reward bonus = PKR 300!
+      // 2. Re-compute and update citizen's trust score based on accuracy
+      await syncReporterTrustScore(caseItem.reporterId);
+
+      // 3. Credit citizen wallet: PKR 100 review refund + PKR 200 reward bonus = PKR 300!
       try {
         await supabase.rpc('credit_citizen_reward_payout', {
           p_report_id: caseItem.reportId,
@@ -209,6 +234,9 @@ export function App() {
           officer_verdict_at: new Date().toISOString(),
         })
         .eq('report_id', caseItem.reportId);
+
+      // Re-compute and update citizen's trust score based on accuracy
+      await syncReporterTrustScore(caseItem.reporterId);
 
       await fetchCases();
     } catch (e) {
