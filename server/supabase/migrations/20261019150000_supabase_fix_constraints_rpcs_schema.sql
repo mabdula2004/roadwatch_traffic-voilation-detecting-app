@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS public.evidence (
 );
 
 -- 4. Create credit_citizen_reward_payout RPC
+DROP FUNCTION IF EXISTS public.credit_citizen_reward_payout(uuid, integer);
+DROP FUNCTION IF EXISTS public.credit_citizen_reward_payout(uuid, int4);
+DROP FUNCTION IF EXISTS public.credit_citizen_reward_payout(text, integer);
 CREATE OR REPLACE FUNCTION public.credit_citizen_reward_payout(
   p_report_id uuid,
   p_payout_amount integer
@@ -79,6 +82,8 @@ END;
 $$;
 
 -- 5. Re-create complete_reporter_registration RPC
+DROP FUNCTION IF EXISTS public.complete_reporter_registration(text, text, text, text);
+DROP FUNCTION IF EXISTS public.complete_reporter_registration(text, text, text);
 CREATE OR REPLACE FUNCTION public.complete_reporter_registration(
   p_name text,
   p_cnic text,
