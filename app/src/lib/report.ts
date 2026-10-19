@@ -524,6 +524,8 @@ export async function uploadReport(
           ai_confidence: aiResult?.plateConfidence ?? (aiResult?.clarityScore ? Math.round(aiResult.clarityScore) : null),
           vehicle_plate: aiResult?.plateNumber || null,
           location_name: clip.locationName || null,
+          video_url: remoteVideoUrl,
+          frame_uris: remoteFrameUrls.length > 0 ? remoteFrameUrls : (frameUris.length > 0 ? frameUris : null),
         })
         .select('report_id')
         .single();
@@ -546,16 +548,6 @@ export async function uploadReport(
             });
           } catch {}
         }
-
-        // Try updating convenience columns on reports table if migration was applied
-        try {
-          await supabase.from('reports').update({
-            vehicle_plate: aiResult?.plateNumber || 'LEA-4471',
-            location_name: clip.locationName || 'Lahore',
-            video_url: remoteVideoUrl,
-            frame_uris: remoteFrameUrls.length > 0 ? remoteFrameUrls : undefined,
-          }).eq('report_id', finalReportId);
-        } catch {}
       } else if (insertError) {
         console.log('Local vault secured report. Remote DB sync note:', insertError.message);
       }
@@ -749,6 +741,8 @@ export async function updateReportStatus(
     };
     if (extra?.citizenDetails?.plateNumber) updatePayload.citizen_plate = extra.citizenDetails.plateNumber;
     if (extra?.citizenDetails?.vehicleMakeModel) updatePayload.citizen_vehicle_model = extra.citizenDetails.vehicleMakeModel;
+    if (extra?.citizenDetails?.vehicleColor) updatePayload.citizen_vehicle_color = extra.citizenDetails.vehicleColor;
+    if (extra?.citizenDetails?.vehicleType) updatePayload.citizen_vehicle_type = extra.citizenDetails.vehicleType;
     if (extra?.citizenDetails?.citizenNote) updatePayload.citizen_note = extra.citizenDetails.citizenNote;
 
     if (isReportUuid) {

@@ -176,7 +176,7 @@ export function Vault() {
       if (currentUserId) {
         const { data, error } = await supabase
           .from('reports')
-          .select('report_id,claimed_class,captured_at,status,geo_lat,geo_long,client_capture_id')
+          .select('report_id,claimed_class,captured_at,status,geo_lat,geo_long,client_capture_id,location_name,vehicle_plate,video_url,frame_uris,citizen_note,citizen_plate,citizen_vehicle_model,citizen_vehicle_color,citizen_vehicle_type,officer_verdict,officer_note,officer_verdict_at,ai_verdict,ai_confidence')
           .eq('reporter_id', currentUserId)
           .order('captured_at', { ascending: false })
           .limit(100);
@@ -189,17 +189,38 @@ export function Vault() {
       const seen = new Set<string>();
       const combined: ReportRow[] = [];
 
-      // Prioritize local rich records
+      // Prioritize local rich records, and synchronize any remote officer verdicts or status updates
       for (const l of formattedLocal) {
         seen.add(l.report_id);
         const matchItem = filteredLocalList.find(x => x.reportId === l.report_id);
         if (matchItem?.clientCaptureId) {
           seen.add(matchItem.clientCaptureId);
         }
+
+        const remoteMatch = remoteList.find(r =>
+          r.report_id === l.report_id ||
+          (r.client_capture_id && (r.client_capture_id === l.client_capture_id || (matchItem && r.client_capture_id === matchItem.clientCaptureId)))
+        );
+
+        if (remoteMatch) {
+          let normStatus = remoteMatch.status;
+          if (remoteMatch.status === 'fined') normStatus = 'accepted';
+          else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity'].includes(remoteMatch.status)) normStatus = 'rejected';
+          else if (['pending_manual_review', 'under_review'].includes(remoteMatch.status)) normStatus = 'under_review';
+
+          if (remoteMatch.officer_verdict) l.officer_verdict = remoteMatch.officer_verdict;
+          if (remoteMatch.officer_note) l.officer_note = remoteMatch.officer_note;
+          if (remoteMatch.vehicle_plate && !l.plate_number) l.plate_number = remoteMatch.vehicle_plate;
+          if (remoteMatch.location_name && !l.location_name) l.location_name = remoteMatch.location_name;
+          if (remoteMatch.status && remoteMatch.status !== 'submitted') {
+            l.status = normStatus;
+          }
+        }
+
         combined.push(l);
       }
 
-      // Merge any remote reports not in local and not deleted
+      // Merge any remote reports not in local and not deleted (e.g. after clean install / new device)
       for (const r of remoteList) {
         if (deletedIds.has(r.report_id) || (r.client_capture_id && deletedIds.has(r.client_capture_id))) {
           continue;
@@ -220,9 +241,19 @@ export function Vault() {
             status: normStatus,
             geo_lat: r.geo_lat,
             geo_long: r.geo_long,
+            location_name: r.location_name,
             reward_pkr: normStatus === 'accepted' ? 200 : undefined,
             penalty_pkr: normStatus === 'rejected' ? 50 : undefined,
+            plate_number: r.citizen_plate || r.vehicle_plate || undefined,
+            officer_verdict: r.officer_verdict,
+            officer_note: r.officer_note,
+            frame_uris: Array.isArray(r.frame_uris) && r.frame_uris.length > 0 ? r.frame_uris : undefined,
             client_capture_id: r.client_capture_id,
+            citizen_plate: r.citizen_plate,
+            citizen_vehicle_model: r.citizen_vehicle_model,
+            citizen_vehicle_color: r.citizen_vehicle_color,
+            citizen_vehicle_type: r.citizen_vehicle_type,
+            citizen_note: r.citizen_note,
           });
         }
       }
