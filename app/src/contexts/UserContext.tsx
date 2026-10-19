@@ -53,6 +53,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Ignore cached profile if it belonged to a different email/account
+    if (localCached.email && auth.user.email && localCached.email.toLowerCase() !== auth.user.email.toLowerCase()) {
+      localCached = {};
+    }
+
     try {
       const [userRes, reporterRes] = await Promise.all([
         supabase.from('base_users').select('name,phone,email,cnic_last4').eq('user_id', auth.user.id).maybeSingle(),
@@ -119,10 +124,19 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void refreshProfile().catch(() => { });
-    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
         setProfile(emptyProfile);
-        void AsyncStorage.removeItem(PROFILE_CACHE_KEY).catch(() => { });
+        try {
+          await AsyncStorage.multiRemove([
+            PROFILE_CACHE_KEY,
+            '@roadwatch_citizen_wallet_balance',
+            '@roadwatch_citizen_wallet_transactions',
+            '@roadwatch_local_vault_reports',
+            '@roadwatch_reporter_citations',
+            '@roadwatch_deleted_report_ids',
+          ]);
+        } catch { }
       } else {
         setTimeout(() => { void refreshProfile().catch(() => { }); }, 0);
       }

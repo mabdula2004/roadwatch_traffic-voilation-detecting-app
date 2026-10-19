@@ -56,11 +56,17 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
         const { data: auth } = await supabase.auth.getUser();
         const userId = auth?.user?.id;
 
+        if (!userId) {
+          if (alive) {
+            setStats({ approved: 0, rejected: 0 });
+            setTrustScore(100);
+          }
+          return;
+        }
+
         const [reporter, reports] = await Promise.all([
-          userId
-            ? supabase.from('reporter_profiles').select('trust_score').eq('reporter_id', userId).maybeSingle()
-            : supabase.from('reporter_profiles').select('trust_score').maybeSingle(),
-          supabase.from('reports').select('status').in('status', ['accepted', 'approved', 'rejected']),
+          supabase.from('reporter_profiles').select('trust_score').eq('reporter_id', userId).maybeSingle(),
+          supabase.from('reports').select('status').eq('reporter_id', userId).in('status', ['accepted', 'approved', 'rejected']),
         ]);
 
         if (alive) {
@@ -88,7 +94,7 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
           setTrustScore(finalScore);
 
           // Sync computed score back to Supabase reporter_profiles
-          if (userId && (!reporter.data || reporter.data.trust_score !== finalScore)) {
+          if (reporter.data && reporter.data.trust_score !== finalScore) {
             void supabase
               .from('reporter_profiles')
               .update({ trust_score: finalScore })
@@ -115,13 +121,23 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
       void supabase.removeChannel(channel);
     };
   }, []);
+
   useEffect(() => {
     let alive = true;
-    void supabase.from('reporter_profiles').select('language,theme').single().then(({ data }) => {
+    async function loadPreferences() {
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id;
+      if (!userId) return;
+      const { data } = await supabase
+        .from('reporter_profiles')
+        .select('language,theme')
+        .eq('reporter_id', userId)
+        .maybeSingle();
       if (!alive || !data) return;
       if (data.language === 'ur' || data.language === 'en') setLanguage(data.language);
       if (data.theme === 'dark' || data.theme === 'light' || data.theme === 'system') setTheme(data.theme);
-    });
+    }
+    void loadPreferences();
     return () => { alive = false; };
   }, []);
   async function savePreference(values: { language?: Language; theme?: Theme }) {

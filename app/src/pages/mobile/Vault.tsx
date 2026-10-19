@@ -128,10 +128,13 @@ export function Vault() {
 
   const loadReports = useCallback(async () => {
     try {
+      const { data: auth } = await supabase.auth.getUser();
+      const currentUserId = auth?.user?.id;
+
       const deletedIds = new Set(await getDeletedReportIds());
       const localList = await getLocalReports();
       const filteredLocalList = localList.filter(
-        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId)
+        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId) && (!currentUserId || !item.reporterId || item.reporterId === currentUserId)
       );
 
       const formattedLocal: ReportRow[] = await Promise.all(
@@ -169,13 +172,20 @@ export function Vault() {
         })
       );
 
-      const { data, error } = await supabase
-        .from('reports')
-        .select('report_id,claimed_class,captured_at,status,geo_lat,geo_long,client_capture_id')
-        .order('captured_at', { ascending: false })
-        .limit(100);
+      let remoteList: any[] = [];
+      if (currentUserId) {
+        const { data, error } = await supabase
+          .from('reports')
+          .select('report_id,claimed_class,captured_at,status,geo_lat,geo_long,client_capture_id')
+          .eq('reporter_id', currentUserId)
+          .order('captured_at', { ascending: false })
+          .limit(100);
 
-      const remoteList = (!error && data) ? data : [];
+        if (!error && data) {
+          remoteList = data;
+        }
+      }
+
       const seen = new Set<string>();
       const combined: ReportRow[] = [];
 
@@ -220,10 +230,12 @@ export function Vault() {
       setReports(combined);
       setLoadError('');
     } catch {
+      const { data: auth } = await supabase.auth.getUser();
+      const currentUserId = auth?.user?.id;
       const deletedIds = new Set(await getDeletedReportIds());
       const localOnly = await getLocalReports();
       const filtered = localOnly.filter(
-        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId)
+        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId) && (!currentUserId || !item.reporterId || item.reporterId === currentUserId)
       );
       const mapped = await Promise.all(
         filtered.map(async (item) => {

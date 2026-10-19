@@ -5,6 +5,8 @@ import { supabase } from './supabase';
 import { AiEvidentiaryResult } from './aiAnalysis';
 import { rechargeWalletBalance, deductWalletBalance } from './wallet';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface CapturedClip {
   clientCaptureId: string;
   uri: string;
@@ -25,6 +27,7 @@ export interface CapturedClip {
 export interface StoredCaseReport {
   reportId: string;
   clientCaptureId: string;
+  reporterId?: string;
   claimedClass: string;
   capturedAt: string;
   uploadedAt: string;
@@ -78,12 +81,34 @@ export interface PenaltyCitation {
   plateNumber?: string;
 }
 
-const LOCAL_VAULT_KEY = '@roadwatch_local_vault_reports';
-const CITATIONS_KEY = '@roadwatch_reporter_citations';
+async function getActiveUserId(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getUser();
+    return data?.user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getVaultStorageKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_local_vault_reports_${uid}` : '@roadwatch_local_vault_reports';
+}
+
+async function getCitationsStorageKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_reporter_citations_${uid}` : '@roadwatch_reporter_citations';
+}
+
+async function getDeletedReportsStorageKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_deleted_report_ids_${uid}` : '@roadwatch_deleted_report_ids';
+}
 
 export async function getPenaltyCitations(): Promise<PenaltyCitation[]> {
   try {
-    const raw = await AsyncStorage.getItem(CITATIONS_KEY);
+    const key = await getCitationsStorageKey();
+    const raw = await AsyncStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -92,10 +117,11 @@ export async function getPenaltyCitations(): Promise<PenaltyCitation[]> {
 
 export async function savePenaltyCitation(citation: PenaltyCitation): Promise<void> {
   try {
+    const key = await getCitationsStorageKey();
     const list = await getPenaltyCitations();
     const filtered = list.filter(c => c.reportId !== citation.reportId);
     filtered.unshift(citation);
-    await AsyncStorage.setItem(CITATIONS_KEY, JSON.stringify(filtered));
+    await AsyncStorage.setItem(key, JSON.stringify(filtered));
   } catch (e) {
     console.error('Failed to save penalty citation:', e);
   }
@@ -103,17 +129,17 @@ export async function savePenaltyCitation(citation: PenaltyCitation): Promise<vo
 
 export async function updateCitationStatus(reportId: string, status: PenaltyCitation['status']): Promise<void> {
   try {
+    const key = await getCitationsStorageKey();
     const list = await getPenaltyCitations();
     const updated = list.map(c => c.reportId === reportId ? { ...c, status } : c);
-    await AsyncStorage.setItem(CITATIONS_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(key, JSON.stringify(updated));
   } catch { }
 }
 
-const DELETED_REPORTS_KEY = '@roadwatch_deleted_report_ids';
-
 export async function getDeletedReportIds(): Promise<string[]> {
   try {
-    const raw = await AsyncStorage.getItem(DELETED_REPORTS_KEY);
+    const key = await getDeletedReportsStorageKey();
+    const raw = await AsyncStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -130,20 +156,22 @@ export async function deleteReports(reportIds: string[]): Promise<{ success: boo
 
   // 1. Persist deleted IDs
   try {
+    const delKey = await getDeletedReportsStorageKey();
     const existing = await getDeletedReportIds();
     const combined = Array.from(new Set([...existing, ...reportIds]));
-    await AsyncStorage.setItem(DELETED_REPORTS_KEY, JSON.stringify(combined));
+    await AsyncStorage.setItem(delKey, JSON.stringify(combined));
   } catch (e) {
     console.warn('Failed to save deleted report IDs:', e);
   }
 
   // 2. Remove from local vault storage
   try {
-    const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+    const vaultKey = await getVaultStorageKey();
+    const raw = await AsyncStorage.getItem(vaultKey);
     if (raw) {
       const list: StoredCaseReport[] = JSON.parse(raw);
       const remaining = list.filter(r => !toDelete.has(r.reportId) && !toDelete.has(r.clientCaptureId));
-      await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(remaining));
+      await AsyncStorage.setItem(vaultKey, JSON.stringify(remaining));
     }
   } catch (e) {
     console.error('Failed to remove reports from local vault:', e);
@@ -397,8 +425,7 @@ export async function uploadReport(
   }
 
   // Ensure valid UUID for client_capture_id (required by PostgreSQL schema)
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const validCaptureUuid = isUuid.test(clip.clientCaptureId) ? clip.clientCaptureId : Crypto.randomUUID();
+  const validCaptureUuid = UUID_REGEX.test(clip.clientCaptureId) ? clip.clientCaptureId : Crypto.randomUUID();
 
   // 1. Upload Video & Keyframes to Supabase Storage evidence_vault
   let remoteVideoUrl: string | null = null;
@@ -415,10 +442,33 @@ export async function uploadReport(
     console.warn('Evidence vault storage upload note:', storageErr);
   }
 
-  // 2. Always save in local storage first so user evidence is NEVER lost or blocked
+  // 2. Resolve authenticated user first so localRecord is tagged with the user's ID
+  let userId: string | undefined;
+  let userEmail: string | undefined;
+  let userFullName: string | undefined;
+  try {
+    const { data: sessionData } = await supabase.auth.getUser();
+    userId = sessionData?.user?.id;
+    userEmail = sessionData?.user?.email;
+    userFullName = sessionData?.user?.user_metadata?.full_name;
+    if (!userId) {
+      const cached = await AsyncStorage.getItem('@roadwatch_user_profile');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed.userId && UUID_REGEX.test(parsed.userId)) userId = parsed.userId;
+          if (parsed.email) userEmail = parsed.email;
+          if (parsed.name) userFullName = parsed.name;
+        } catch {}
+      }
+    }
+  } catch {}
+
+  // 3. Always save in user-scoped local storage first so user evidence is NEVER lost or blocked
   const localRecord: StoredCaseReport = {
     reportId: finalReportId,
     clientCaptureId: validCaptureUuid,
+    reporterId: userId,
     claimedClass,
     capturedAt: clip.capturedAt,
     uploadedAt: new Date().toISOString(),
@@ -434,30 +484,16 @@ export async function uploadReport(
   };
   await saveLocalReport(localRecord);
 
-  // 3. Remote Supabase insertion
+  // 4. Remote Supabase insertion
   try {
-    const { data: session } = await supabase.auth.getUser();
-    let userId = session?.user?.id;
-
-    // If unauthenticated, fallback to a persistent local citizen UUID or device user
-    if (!userId) {
-      const cached = await AsyncStorage.getItem('@roadwatch_user_profile');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (parsed.userId && isUuid.test(parsed.userId)) userId = parsed.userId;
-        } catch {}
-      }
-    }
-
     if (userId) {
       // Ensure base_users exists with role and active status
       try {
         await supabase.from('base_users').upsert({
           user_id: userId,
           role: 'reporter',
-          name: session?.user?.user_metadata?.full_name || 'Citizen Reporter',
-          email: session?.user?.email || 'citizen@roadwatch.org',
+          name: userFullName || 'Citizen Reporter',
+          email: userEmail || 'citizen@roadwatch.org',
           account_state: 'active',
           registration_completed_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
@@ -485,7 +521,7 @@ export async function uploadReport(
           client_capture_id: validCaptureUuid,
           status: dbInsertStatus, // 'submitted' — lands in officer pending queue
           ai_verdict: isAccepted ? 'accepted' : 'rejected',
-          ai_confidence: aiResult?.confidence ? Math.round(aiResult.confidence) : null,
+          ai_confidence: aiResult?.plateConfidence ?? (aiResult?.clarityScore ? Math.round(aiResult.clarityScore) : null),
           vehicle_plate: aiResult?.plateNumber || null,
           location_name: clip.locationName || null,
         })
@@ -545,16 +581,17 @@ export function sanitizeReportForStorage(report: StoredCaseReport): StoredCaseRe
 
 export async function saveLocalReport(report: StoredCaseReport) {
   try {
+    const vaultKey = await getVaultStorageKey();
     const cleanReport = sanitizeReportForStorage(report);
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) {
         list = JSON.parse(raw);
       }
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in vault:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       list = [];
     }
 
@@ -562,34 +599,38 @@ export async function saveLocalReport(report: StoredCaseReport) {
     const sanitizedList = list.slice(0, 50).map(sanitizeReportForStorage);
     const filtered = sanitizedList.filter(r => r.clientCaptureId !== cleanReport.clientCaptureId && r.reportId !== cleanReport.reportId);
     filtered.unshift(cleanReport);
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(filtered));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(filtered));
   } catch (e) {
     console.error('Failed to cache local report:', e);
     // Ultimate recovery fallback: reset corrupted key and save just this clean record
     try {
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY);
-      await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify([sanitizeReportForStorage(report)]));
+      const vaultKey = await getVaultStorageKey();
+      await AsyncStorage.removeItem(vaultKey);
+      await AsyncStorage.setItem(vaultKey, JSON.stringify([sanitizeReportForStorage(report)]));
     } catch { }
   }
 }
 
 export async function getLocalReports(): Promise<StoredCaseReport[]> {
   try {
+    const vaultKey = await getVaultStorageKey();
     let raw: string | null = null;
     try {
-      raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      raw = await AsyncStorage.getItem(vaultKey);
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in getLocalReports:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       return [];
     }
 
     if (!raw) return [];
     const list: StoredCaseReport[] = JSON.parse(raw);
     const deletedIds = new Set(await getDeletedReportIds());
+    const currentUid = await getActiveUserId();
 
     return list
       .filter(r => !deletedIds.has(r.reportId) && !deletedIds.has(r.clientCaptureId))
+      .filter(r => !currentUid || !r.reporterId || r.reporterId === currentUid)
       .map(r => {
         let normStatus = r.status;
         if (r.status === 'fined') normStatus = 'accepted';
@@ -617,15 +658,16 @@ export async function updateReportStatus(
 ): Promise<void> {
   const normalizedStatus = (status === 'pending_manual_review' || status === 'under_review') ? 'under_review' : status;
   try {
+    const vaultKey = await getVaultStorageKey();
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) {
         list = JSON.parse(raw);
       }
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in updateReportStatus:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       list = [];
     }
 
@@ -681,7 +723,7 @@ export async function updateReportStatus(
       return sanitizeReportForStorage(item);
     });
 
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(updated));
 
     // If user paid PKR 100 to dispute, refund the automatic PKR 50 false report penalty
     if (penaltyToRefund > 0) {
@@ -699,7 +741,7 @@ export async function updateReportStatus(
 
   // Safe Supabase update & guarantee presence on Officer Dashboard
   try {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportIdentifier);
+    const isReportUuid = UUID_REGEX.test(reportIdentifier);
     let updated = false;
 
     const updatePayload: Record<string, any> = {
@@ -709,7 +751,7 @@ export async function updateReportStatus(
     if (extra?.citizenDetails?.vehicleMakeModel) updatePayload.citizen_vehicle_model = extra.citizenDetails.vehicleMakeModel;
     if (extra?.citizenDetails?.citizenNote) updatePayload.citizen_note = extra.citizenDetails.citizenNote;
 
-    if (isUuid) {
+    if (isReportUuid) {
       const { data } = await supabase.from('reports').update(updatePayload).eq('report_id', reportIdentifier).select('report_id');
       if (data && data.length > 0) updated = true;
     }
@@ -727,35 +769,40 @@ export async function updateReportStatus(
         if (cached) {
           try {
             const p = JSON.parse(cached);
-            if (p.userId && isUuid.test(p.userId)) userId = p.userId;
+            if (p.userId && UUID_REGEX.test(p.userId)) userId = p.userId;
           } catch {}
         }
       }
 
       if (userId) {
-        const captureUuid = (clientCaptureId && isUuid.test(clientCaptureId)) ? clientCaptureId : Crypto.randomUUID();
+        const captureUuid = (clientCaptureId && UUID_REGEX.test(clientCaptureId)) ? clientCaptureId : Crypto.randomUUID();
         // Insert as 'submitted' first (satisfies CHECK constraint), then update to desired status
-        const { data: newRow } = await supabase.from('reports').insert({
-          reporter_id: userId,
-          claimed_class: extra?.citizenDetails?.violationType || 'red_light_running',
-          status: 'submitted',
-          client_capture_id: captureUuid,
-          captured_at: new Date().toISOString(),
-          uploaded_at: new Date().toISOString(),
-          geo_lat: 31.5204,
-          geo_long: 74.3587,
-          location_accuracy_m: 10,
-          citizen_note: extra?.citizenDetails?.citizenNote || undefined,
-          citizen_plate: extra?.citizenDetails?.plateNumber || undefined,
-          citizen_vehicle_model: extra?.citizenDetails?.vehicleMakeModel || undefined,
-        }).select('report_id').single().catch(() => ({ data: null }));
+        let newRow: { report_id: string } | null = null;
+        try {
+          const res = await supabase.from('reports').insert({
+            reporter_id: userId,
+            claimed_class: extra?.citizenDetails?.violationType || 'red_light_running',
+            status: 'submitted',
+            client_capture_id: captureUuid,
+            captured_at: new Date().toISOString(),
+            uploaded_at: new Date().toISOString(),
+            geo_lat: 31.5204,
+            geo_long: 74.3587,
+            location_accuracy_m: 10,
+            citizen_note: extra?.citizenDetails?.citizenNote || undefined,
+            citizen_plate: extra?.citizenDetails?.plateNumber || undefined,
+            citizen_vehicle_model: extra?.citizenDetails?.vehicleMakeModel || undefined,
+          }).select('report_id').single();
+          newRow = res.data;
+        } catch {}
 
         // If status differs from 'submitted', update it now
         if (newRow?.report_id && normalizedStatus !== 'submitted') {
-          await supabase.from('reports')
-            .update({ status: normalizedStatus })
-            .eq('report_id', newRow.report_id)
-            .catch(() => {});
+          try {
+            await supabase.from('reports')
+              .update({ status: normalizedStatus })
+              .eq('report_id', newRow.report_id);
+          } catch {}
         }
       }
     }
@@ -774,9 +821,10 @@ export async function updateReportCitizenDetails(
   clientCaptureId?: string
 ): Promise<void> {
   try {
+    const vaultKey = await getVaultStorageKey();
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) list = JSON.parse(raw);
     } catch (e) {
       console.warn('Failed reading local vault in updateReportCitizenDetails:', e);
@@ -819,7 +867,7 @@ export async function updateReportCitizenDetails(
       return sanitizeReportForStorage(item);
     });
 
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(updated));
   } catch (err) {
     console.error('Failed to save citizen details to local vault:', err);
   }
@@ -836,13 +884,14 @@ export async function resolveHumanReview(
 ): Promise<{ success: boolean; newStatus: string; payoutPkr: number }> {
   let payoutPkr = 0;
   try {
+    const vaultKey = await getVaultStorageKey();
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) list = JSON.parse(raw);
     } catch (cursorErr) {
       console.warn('Recovering from CursorWindow in resolveHumanReview:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       return { success: false, newStatus: 'unknown', payoutPkr: 0 };
     }
 
@@ -890,7 +939,7 @@ export async function resolveHumanReview(
       return sanitizeReportForStorage(item);
     });
 
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(updated));
 
     // Supabase update
     try {
@@ -904,5 +953,25 @@ export async function resolveHumanReview(
     console.error('Error resolving human review:', err);
     return { success: false, newStatus: 'error', payoutPkr: 0 };
   }
+}
+
+/**
+ * Purges local report vault cache (both legacy un-scoped and user-scoped keys)
+ */
+export async function clearReportsCache(userId?: string): Promise<void> {
+  try {
+    const uid = userId || (await getActiveUserId());
+    const keys = [
+      '@roadwatch_local_vault_reports',
+      '@roadwatch_reporter_citations',
+      '@roadwatch_deleted_report_ids',
+    ];
+    if (uid) {
+      keys.push(`@roadwatch_local_vault_reports_${uid}`);
+      keys.push(`@roadwatch_reporter_citations_${uid}`);
+      keys.push(`@roadwatch_deleted_report_ids_${uid}`);
+    }
+    await AsyncStorage.multiRemove(keys);
+  } catch {}
 }
 

@@ -239,6 +239,17 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         } catch {}
       }
 
+      // 0. Purge any legacy un-scoped storage from previous session before creating or signing in
+      await AsyncStorage.multiRemove([
+        '@roadwatch_user_profile',
+        '@roadwatch_citizen_wallet_balance',
+        '@roadwatch_citizen_wallet_transactions',
+        '@roadwatch_local_vault_reports',
+        '@roadwatch_reporter_citations',
+        '@roadwatch_deleted_report_ids',
+        ONBOARDING_TEMP_STORAGE_KEY,
+      ]).catch(() => {});
+
       // 1. Ensure user account is actually created or signed in with Supabase Auth
       let { data: auth } = await supabase.auth.getUser();
       let currentUserId = auth.user?.id;
@@ -281,6 +292,15 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       await AsyncStorage.removeItem(ONBOARDING_TEMP_STORAGE_KEY).catch(() => {});
 
       if (currentUserId) {
+        // Initialize user-scoped storage so this new account starts pristine
+        await AsyncStorage.multiSet([
+          [`@roadwatch_wallet_balance_${currentUserId}`, '0'],
+          [`@roadwatch_wallet_transactions_${currentUserId}`, '[]'],
+          [`@roadwatch_local_vault_reports_${currentUserId}`, '[]'],
+          [`@roadwatch_reporter_citations_${currentUserId}`, '[]'],
+          [`@roadwatch_deleted_report_ids_${currentUserId}`, '[]'],
+        ]).catch(() => {});
+
         // Direct save into base_users
         try {
           const { error: bErr } = await supabase.from('base_users').upsert({
@@ -360,6 +380,15 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setBusy(true);
     setError('');
     try {
+      await AsyncStorage.multiRemove([
+        '@roadwatch_user_profile',
+        '@roadwatch_citizen_wallet_balance',
+        '@roadwatch_citizen_wallet_transactions',
+        '@roadwatch_local_vault_reports',
+        '@roadwatch_reporter_citations',
+        '@roadwatch_deleted_report_ids',
+      ]).catch(() => {});
+
       const targetEmail = loginEmail.trim().toLowerCase();
       const { error: loginErr } = await supabase.auth.signInWithPassword({
         email: targetEmail,
@@ -416,6 +445,15 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setBusy(true);
     setError('');
     try {
+      await AsyncStorage.multiRemove([
+        '@roadwatch_user_profile',
+        '@roadwatch_citizen_wallet_balance',
+        '@roadwatch_citizen_wallet_transactions',
+        '@roadwatch_local_vault_reports',
+        '@roadwatch_reporter_citations',
+        '@roadwatch_deleted_report_ids',
+      ]).catch(() => {});
+
       const { error: loginErr } = await supabase.auth.signInWithPassword({
         email: 'abdullah@roadwatch.local',
         password: '123456',
@@ -436,6 +474,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               email: 'abdullah@roadwatch.local',
               phone: '+92 300 1234567',
               cnic_last4: '8899',
+              role: 'reporter',
               account_state: 'active',
               registration_completed_at: new Date().toISOString(),
             });

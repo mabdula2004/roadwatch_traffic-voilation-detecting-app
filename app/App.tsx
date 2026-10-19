@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
 import type { CapturedClip } from './src/lib/report';
 import { Colors } from './src/constants/theme';
@@ -128,7 +129,21 @@ function MainApp() {
 
         {activeScreen === 'settings' && (
           <Settings
-            onLogout={() => { void supabase.auth.signOut(); }}
+            onLogout={async () => {
+              try {
+                await AsyncStorage.multiRemove([
+                  '@roadwatch_user_profile',
+                  '@roadwatch_citizen_wallet_balance',
+                  '@roadwatch_citizen_wallet_transactions',
+                  '@roadwatch_local_vault_reports',
+                  '@roadwatch_reporter_citations',
+                  '@roadwatch_deleted_report_ids',
+                  '@roadwatch_onboarding_temp_profile',
+                ]);
+              } catch {}
+              await supabase.auth.signOut();
+              setIsOnboarded(false);
+            }}
             onNavigate={(screen) => setActiveScreen(screen)}
           />
         )}
