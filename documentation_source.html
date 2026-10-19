@@ -534,7 +534,7 @@
       <tr>
         <td><strong>Section 2</strong></td>
         <td>Ecosystem User Roles & Personas</td>
-        <td>Citizen, Officer, Auditor, Violator</td>
+        <td>Citizen, Officer, Violator</td>
       </tr>
       <tr>
         <td><strong>Section 3</strong></td>
@@ -587,10 +587,10 @@
 
   <h1><span class="icon">👥</span> Ecosystem User Roles & Personas</h1>
   <p>
-    The RoadWatch ecosystem operates on four clearly segmented human personas and one autonomous background engine. Each role possesses strict operational boundaries and security limits.
+    The RoadWatch ecosystem operates on three primary operational roles and one autonomous background engine. All verification, dispute adjudication, and audit logging are unified within the single Officer Command Web Dashboard.
   </p>
 
-  <div class="roles-grid avoid-break">
+  <div class="roles-grid avoid-break" style="grid-template-columns: repeat(3, 1fr);">
     <div class="role-card">
       <div class="role-header">
         <span class="role-title">📱 1. Citizen Reporter</span>
@@ -616,7 +616,7 @@
         <span class="badge badge-green">Role: officer</span>
       </div>
       <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
-        Certified municipal enforcement personnel stationed at command review desks on the web portal.
+        Certified municipal enforcement personnel operating the unified Command Audit Web Portal.
       </p>
       <ul class="role-list">
         <li>Receives real-time incoming violations via zero-latency WebSockets.</li>
@@ -625,31 +625,16 @@
         <li>Cross-checks satellite GPS coordinates, timestamp, and reporter notes.</li>
         <li>Executes 1-click <code>Accept</code> (issues fine, credits wallet, boosts score).</li>
         <li>Executes 1-click <code>Reject</code> with reason tag (penalizes fake reports).</li>
+        <li>Adjudicates Citizen Dispute Appeals under the Disputed Cases room.</li>
+        <li>Audits closed citations and exports official CSV logs for courts.</li>
+        <li>Monitors Citizen Reporter Registry & trust reputation scores.</li>
         <li>Utilizes rapid keyboard hotkeys (<code>A</code>, <code>R</code>, <code>Space</code>, <code>J</code>, <code>K</code>).</li>
       </ul>
     </div>
 
     <div class="role-card">
       <div class="role-header">
-        <span class="role-title">🔍 3. Enforcement Supervisor</span>
-        <span class="badge badge-purple">Role: auditor / admin</span>
-      </div>
-      <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
-        Senior traffic police superintendents and legal auditors managing department integrity.
-      </p>
-      <ul class="role-list">
-        <li>Conducts secondary hearings on Citizen Dispute Appeals.</li>
-        <li>Audits closed citations with date-range, plate, and officer filters.</li>
-        <li>Generates and exports legal CSV logs for court evidence filing.</li>
-        <li>Monitors the Citizen Reporter Registry & trust reputation metrics.</li>
-        <li>Identifies malicious or spam reporters and flags accounts for suspension.</li>
-        <li>Inspects departmental SLA compliance and officer throughput.</li>
-      </ul>
-    </div>
-
-    <div class="role-card">
-      <div class="role-header">
-        <span class="role-title">🚗 4. Vehicle Offender</span>
+        <span class="role-title">🚗 3. Vehicle Offender</span>
         <span class="badge badge-amber">Role: offender</span>
       </div>
       <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
@@ -668,10 +653,9 @@
   <table class="avoid-break">
     <thead>
       <tr>
-        <th>Operational Capability</th>
-        <th>Citizen (`reporter`)</th>
-        <th>Officer (`officer`)</th>
-        <th>Supervisor (`auditor`)</th>
+        <th style="width: 38%;">Operational Capability</th>
+        <th style="width: 31%;">Citizen (`reporter`)</th>
+        <th style="width: 31%;">Traffic Police Officer (`officer`)</th>
       </tr>
     </thead>
     <tbody>
@@ -679,57 +663,47 @@
         <td><strong>Record & Submit 10s Evidence</strong></td>
         <td><span class="badge badge-green">ALLOW</span></td>
         <td><span class="badge badge-red">DENY</span></td>
-        <td><span class="badge badge-red">DENY</span></td>
       </tr>
       <tr>
         <td><strong>Access Personal Evidence Vault</strong></td>
         <td><span class="badge badge-green">OWN RECORDS ONLY</span></td>
-        <td><span class="badge badge-blue">ALL PENDING</span></td>
-        <td><span class="badge badge-blue">ALL HISTORICAL</span></td>
+        <td><span class="badge badge-blue">ALL CASES (PENDING & HISTORICAL)</span></td>
       </tr>
       <tr>
         <td><strong>Earn & Withdraw Civic Bounty (PKR)</strong></td>
         <td><span class="badge badge-green">ALLOW</span></td>
-        <td><span class="badge badge-red">DENY</span></td>
-        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-red">DENY (AUDIT ACCESS ONLY)</span></td>
       </tr>
       <tr>
         <td><strong>Realtime Pending Queue Ingestion</strong></td>
         <td><span class="badge badge-red">DENY</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-green">ALLOW (LIVE WEBSOCKET STREAM)</span></td>
       </tr>
       <tr>
         <td><strong>Accept / Reject Legal Citation</strong></td>
         <td><span class="badge badge-red">DENY</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-green">ALLOW (ONE-CLICK HOTKEYS: A / R)</span></td>
       </tr>
       <tr>
         <td><strong>File Contested Dispute Appeal</strong></td>
-        <td><span class="badge badge-green">ALLOW (PKR 100)</span></td>
-        <td><span class="badge badge-red">DENY</span></td>
+        <td><span class="badge badge-green">ALLOW (PKR 100 REFUNDABLE BOND)</span></td>
         <td><span class="badge badge-red">DENY</span></td>
       </tr>
       <tr>
-        <td><strong>Adjudicate Citizen Appeals</strong></td>
+        <td><strong>Adjudicate Citizen Dispute Appeals</strong></td>
         <td><span class="badge badge-red">DENY</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
-        <td><span class="badge badge-green">ALLOW (FINAL)</span></td>
+        <td><span class="badge badge-green">ALLOW (DISPUTED CASES ROOM)</span></td>
       </tr>
       <tr>
         <td><strong>Export Audit Records to CSV</strong></td>
         <td><span class="badge badge-red">DENY</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><span class="badge badge-green">ALLOW (CASE LIST WORKSPACE)</span></td>
       </tr>
       <tr>
-        <td><strong>Suspend Abusive Reporter Accounts</strong></td>
-        <td><span class="badge badge-red">DENY</span></td>
-        <td><span class="badge badge-amber">FLAG ONLY</span></td>
-        <td><span class="badge badge-green">ALLOW</span></td>
+        <td><strong>Monitor Reporter Registry & Trust Scores</strong></td>
+        <td><span class="badge badge-green">OWN TRUST SCORE ONLY</span></td>
+        <td><span class="badge badge-green">ALLOW (REGISTRY WORKSPACE)</span></td>
       </tr>
-    </tbody>
   </table>
 
   <!-- SECTION 4: END-TO-END WORKFLOW -->
@@ -806,13 +780,13 @@
     <div class="flow-step">
       <div class="step-number">5</div>
       <div class="step-content">
-        <div class="step-title">Stage 5: Citizen Dispute Appeal & Escalation Protocol</div>
+        <div class="step-title">Stage 5: Citizen Dispute Appeal & Re-Audit Protocol</div>
         <div class="step-desc">
-          If an honest citizen's submission is rejected, they are notified with the officer's reason. The citizen can initiate a formal <strong>Dispute Appeal</strong> by depositing a <strong>PKR 100 refundable bond</strong> and providing written contestation. The report transitions to <code>pending_manual_review</code> under the dashboard's "Disputed Cases" tab for supervisor audit. If the rejection is overturned, the PKR 100 deposit is refunded, the bounty is awarded, and the trust penalty is reversed.
+          If an honest citizen's submission is rejected, they are notified with the officer's reason. The citizen can initiate a formal <strong>Dispute Appeal</strong> by depositing a <strong>PKR 100 refundable bond</strong> and providing written contestation. The report transitions to <code>pending_manual_review</code> under the dashboard's "Disputed Cases" tab for officer re-audit. If the rejection is overturned, the PKR 100 deposit is refunded, the bounty is awarded, and the trust penalty is reversed.
         </div>
         <div class="step-tags">
           <span class="badge badge-red">PKR 100 Deposit</span>
-          <span class="badge badge-purple">Supervisor Hearing</span>
+          <span class="badge badge-purple">Officer Appeal Hearing</span>
           <span class="badge badge-green">Bond Refund</span>
         </div>
       </div>
@@ -949,7 +923,7 @@
       <tr>
         <td><strong>Officer Rejects Malicious / Fake Claim</strong></td>
         <td><span class="badge badge-red">-15 pts</span></td>
-        <td>Substantial penalty; account flagged for supervisor review.</td>
+        <td>Substantial penalty; account flagged on officer registry for suspension.</td>
       </tr>
       <tr>
         <td><strong>Trust Score Drops Below 20 pts</strong></td>

@@ -37,7 +37,7 @@
 
 ## 👥 User Roles & Ecosystem Personas
 
-To prevent ambiguity, RoadWatch defines **four distinct operational roles** in the ecosystem:
+To prevent ambiguity, RoadWatch defines **three distinct operational roles** in the ecosystem, supported by an autonomous backend engine:
 
 ```mermaid
 graph LR
@@ -51,8 +51,7 @@ graph LR
     end
 
     subgraph LawEnforcement["🖥️ Law Enforcement"]
-        O1[Traffic Police Officer]
-        A1[Enforcement Auditor]
+        O1[Traffic Police Officer<br>(Unified Command & Audit Desk)]
     end
 
     subgraph Offenders["🚗 Traffic Offenders"]
@@ -65,7 +64,7 @@ graph LR
     O1 -->|Accepts Citation| V1
     O1 -->|Credits Reward Bounty| C1
     O1 -->|Penalizes Fake Claims| C1
-    A1 -->|Audits History & Appeals| S2
+    O1 -->|Audits History & Appeals| S2
 ```
 
 ### 1. 📱 Citizen Reporter (`reporter`)
@@ -82,37 +81,26 @@ graph LR
 
 ---
 
-### 2. 👮 Traffic Police Officer / Verifier (`officer`)
-- **Who they are:** Municipal traffic enforcement personnel stationed at command centers or audit desks.
-- **Primary Objectives:** Rapidly verify incoming citizen reports, adjudicate citations with human-in-the-loop accountability, prevent wrongful fines, and resolve citizen appeals.
+### 2. 👮 Traffic Police Officer (`officer`)
+- **Who they are:** Certified municipal traffic enforcement personnel operating the unified Command Web Portal (`dashboard/`).
+- **Primary Objectives:** Rapidly verify incoming citizen reports, adjudicate citations with human-in-the-loop accountability, resolve citizen appeals, audit historical closed cases, and monitor citizen trust reputation.
 - **Capabilities & Actions:**
   - Access the live, zero-latency **Pending Verification Queue** via WebSocket updates without refreshing.
   - Use the full-featured **Evidence Stage** to inspect:
-    - High-definition in-browser MP4 video playback.
+    - High-definition in-browser MP4 video playback streamed directly from Supabase `evidence_vault`.
     - Extracted multi-angle keyframes (`frame_1.jpg`, `frame_2.jpg`, `frame_3.jpg`).
     - Verified capture GPS coordinates, date/time stamps, vehicle plate numbers, and reporter notes.
   - **One-Click Adjudication:**
     - **Accept Citation (`A` key):** Issues an official e-challan, adds PKR bounty to the citizen's wallet, and increments their Trust Score (+2).
     - **Reject Citation (`R` key):** Dismisses report with reason tagging (Blurry, Inconclusive, No Violation, Duplicate) and penalizes citizen Trust Score (-15) if fraudulent.
-  - Adjudicate contested citizen appeals under the **Disputed Cases** tab.
+  - **Dispute Appeal Hearing:** Adjudicates contested citizen appeals with deposited PKR 100 bonds under the **Disputed Cases** tab.
+  - **Closed Cases Audit & CSV Export:** Search historical records by citation ID, license plate, or date range, and export official CSV audit logs.
+  - **Citizen Reporter Registry:** Monitors contributors, total reports submitted, accuracy percentages, and trust scores (0 to 100).
   - Fast keyboard shortcuts (`A` Accept, `R` Reject, `Space` Play/Pause, `J`/`K` Navigate Queue).
 
 ---
 
-### 3. 🔍 Enforcement Supervisor / Auditor (`admin` / `auditor`)
-- **Who they are:** Senior traffic superintendents and legal auditors responsible for quality assurance and fraud monitoring.
-- **Primary Objectives:** Ensure fairness, inspect historical records for legal proceedings, and manage reporter credentials.
-- **Capabilities & Actions:**
-  - Search closed cases by citation ID, license plate, violation category, or date range.
-  - Export filtered citation datasets as official **CSV Audit Logs** for court evidence and department archives.
-  - Access the **Citizen Reporter Registry**:
-    - Monitor top contributors, total reports submitted, and accuracy percentages.
-    - Inspect real-time citizen Trust Scores (0 to 100).
-    - Identify and suspend fraudulent or malicious accounts.
-
----
-
-### 4. 🚗 Vehicle Offender / Violator (`offender`)
+### 3. 🚗 Vehicle Offender / Violator (`offender`)
 - **Who they are:** The driver or vehicle owner who committed the traffic offense on public roads.
 - **Role in System:**
   - Subject of the citation issued post-human officer approval.
@@ -122,21 +110,21 @@ graph LR
 
 ## 📊 Role-Based Feature & Access Matrix
 
-| Feature / Capability | Citizen (`reporter`) | Traffic Officer (`officer`) | Auditor / Admin (`auditor`) |
-| :--- | :---: | :---: | :---: |
-| **Phone OTP & CNIC Registration** | ✅ Yes | ❌ (Pre-provisioned) | ❌ (Pre-provisioned) |
-| **10s Video Capture HUD & GPS Stamping** | ✅ Yes | ❌ No | ❌ No |
-| **AI Detection & Plate Inspection** | ✅ Yes | ✅ Yes | ✅ Yes |
-| **Private Evidence Vault Access** | ✅ (Own reports only) | ✅ (All pending reports) | ✅ (All historical reports) |
-| **Civic Reward Wallet (PKR Balances)** | ✅ (Own wallet) | ❌ Read-only audit | ❌ Read-only audit |
-| **Emergency SOS Dialing (1122 / 15)** | ✅ Yes | ❌ No | ❌ No |
-| **Live WebSocket Review Queue** | ❌ No | ✅ Yes | ✅ Yes |
-| **Evidence Video Player & Keyframe Stage** | ❌ (Own preview only) | ✅ Yes | ✅ Yes |
-| **Accept / Reject Citation Adjudication** | ❌ No | ✅ Yes | ✅ Yes |
-| **Dispute & Appeal Submission** | ✅ Yes (PKR 100 bond) | ❌ No | ❌ No |
-| **Dispute & Appeal Resolution** | ❌ No | ✅ Yes | ✅ Yes |
-| **Closed Cases Search & CSV Export** | ❌ No | ✅ Yes | ✅ Yes |
-| **Citizen Trust Score Registry Audit** | ❌ (Own score only) | ✅ View summary | ✅ Full management |
+| Feature / Capability | Citizen (`reporter`) | Traffic Officer (`officer`) |
+| :--- | :---: | :---: |
+| **Phone OTP & CNIC Registration** | ✅ Yes | ❌ (Pre-provisioned) |
+| **10s Video Capture HUD & GPS Stamping** | ✅ Yes | ❌ No |
+| **AI Detection & Plate Inspection** | ✅ Yes | ✅ Yes |
+| **Private Evidence Vault Access** | ✅ (Own reports only) | ✅ (All cases: Pending & Historical) |
+| **Civic Reward Wallet (PKR Balances)** | ✅ (Own wallet) | ❌ Read-only audit |
+| **Emergency SOS Dialing (1122 / 15)** | ✅ Yes | ❌ No |
+| **Live WebSocket Review Queue** | ❌ No | ✅ Yes (Instant push) |
+| **Evidence Video Player & Keyframe Stage** | ❌ (Own preview only) | ✅ Yes (Full player) |
+| **Accept / Reject Citation Adjudication** | ❌ No | ✅ Yes (Hotkeys: `A` / `R`) |
+| **Dispute & Appeal Submission** | ✅ Yes (PKR 100 bond) | ❌ No |
+| **Dispute & Appeal Resolution** | ❌ No | ✅ Yes (Disputed Cases room) |
+| **Closed Cases Search & CSV Export** | ❌ No | ✅ Yes (Case List workspace) |
+| **Citizen Trust Score Registry Audit** | ❌ (Own score only) | ✅ Full management |
 
 ---
 
@@ -468,7 +456,7 @@ The optimized production bundle will be generated in `dashboard/dist/`.
 
 RoadWatch implements strict PostgreSQL Row-Level Security (RLS):
 
-| Table | Citizen Access | Officer / Auditor Access | Security Rules |
+| Table | Citizen Access | Officer Access | Security Rules |
 | :--- | :--- | :--- | :--- |
 | `base_users` | Read / Update Own | Read All | Phone and CNIC digest protected. |
 | `reporter_profiles`| Read Own | Read All | Trust scores dynamically updated by system triggers. |
