@@ -289,6 +289,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             email: targetEmail,
             phone: formattedPhone,
             cnic_last4: cnicLast4,
+            role: 'reporter',
             account_state: 'active',
             registration_completed_at: new Date().toISOString(),
           }, { onConflict: 'user_id' });
@@ -303,7 +304,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             reporter_id: currentUserId,
             trust_score: 100,
             vehicle_plate: 'LEA-4471',
-          }, { onConflict: 'reporter_id', ignoreDuplicates: true });
+          }, { onConflict: 'reporter_id' });
           if (rpErr) console.warn('reporter_profiles save warning:', rpErr.message);
         } catch {}
 
@@ -314,7 +315,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             balance: 0,
             pending_clearance: 0,
             epay_linked: false,
-          }, { onConflict: 'reporter_id', ignoreDuplicates: true });
+          }, { onConflict: 'reporter_id' });
         } catch {}
 
         try {
@@ -382,6 +383,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 email: targetEmail,
                 phone: '+92 300 1234567',
                 cnic_last4: '8899',
+                role: 'reporter',
                 account_state: 'active',
                 registration_completed_at: new Date().toISOString(),
               });
