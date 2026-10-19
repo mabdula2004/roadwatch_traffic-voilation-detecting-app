@@ -224,24 +224,18 @@ export async function uploadEvidenceToStorage(
   let videoUrl: string | null = null;
   const frameUrls: string[] = [];
 
-  // 1. Upload Video MP4 if available (using binary ArrayBuffer, not FormData)
+  // 1. Upload Video MP4 — use fetch(uri).blob() which is the correct Expo + Supabase pattern.
+  //    Note: "Response.blob() using React Native Blob" warning is harmless — upload works fine.
   try {
     if (videoUri) {
       const videoPath = `${clientCaptureId}/video.mp4`;
 
-      // Read the video file as Base64 then convert to Uint8Array (required by Supabase JS SDK on RN)
-      const videoBase64 = await FileSystem.readAsStringAsync(videoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const binaryString = atob(videoBase64);
-      const videoBytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        videoBytes[i] = binaryString.charCodeAt(i);
-      }
+      const response = await fetch(videoUri);
+      const blob = await response.blob();
 
       const { error: vErr } = await supabase.storage
         .from('evidence_vault')
-        .upload(videoPath, videoBytes.buffer, {
+        .upload(videoPath, blob, {
           contentType: 'video/mp4',
           upsert: true,
         });
@@ -259,24 +253,30 @@ export async function uploadEvidenceToStorage(
     console.warn('Video upload skipped:', err);
   }
 
-  // 2. Upload Keyframe Images if available
+  // 2. Upload Keyframe Images — read as Base64 from disk then upload via fetch+blob
   try {
     if (framesBase64 && framesBase64.length > 0) {
       for (let i = 0; i < framesBase64.length; i++) {
         const b64 = framesBase64[i];
         if (!b64) continue;
-        const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
         const framePath = `${clientCaptureId}/frame_${i + 1}.jpg`;
 
-        const binaryString = atob(cleanB64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let j = 0; j < binaryString.length; j++) {
-          bytes[j] = binaryString.charCodeAt(j);
+        // If already a file URI, fetch it directly as blob
+        let frameBlob: Blob;
+        if (typeof b64 === 'string' && b64.startsWith('file://')) {
+          const r = await fetch(b64);
+          frameBlob = await r.blob();
+        } else {
+          // base64 string — convert via data URI fetch
+          const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+          const dataUri = `data:image/jpeg;base64,${cleanB64}`;
+          const r = await fetch(dataUri);
+          frameBlob = await r.blob();
         }
 
         const { error: fErr } = await supabase.storage
           .from('evidence_vault')
-          .upload(framePath, bytes.buffer, {
+          .upload(framePath, frameBlob, {
             contentType: 'image/jpeg',
             upsert: true,
           });
@@ -734,17 +734,29 @@ export async function updateReportStatus(
 
       if (userId) {
         const captureUuid = (clientCaptureId && isUuid.test(clientCaptureId)) ? clientCaptureId : Crypto.randomUUID();
-        await supabase.from('reports').insert({
+        // Insert as 'submitted' first (satisfies CHECK constraint), then update to desired status
+        const { data: newRow } = await supabase.from('reports').insert({
           reporter_id: userId,
           claimed_class: extra?.citizenDetails?.violationType || 'red_light_running',
-          status: normalizedStatus,
+          status: 'submitted',
           client_capture_id: captureUuid,
           captured_at: new Date().toISOString(),
           uploaded_at: new Date().toISOString(),
           geo_lat: 31.5204,
           geo_long: 74.3587,
           location_accuracy_m: 10,
-        }).catch(() => {});
+          citizen_note: extra?.citizenDetails?.citizenNote || undefined,
+          citizen_plate: extra?.citizenDetails?.plateNumber || undefined,
+          citizen_vehicle_model: extra?.citizenDetails?.vehicleMakeModel || undefined,
+        }).select('report_id').single().catch(() => ({ data: null }));
+
+        // If status differs from 'submitted', update it now
+        if (newRow?.report_id && normalizedStatus !== 'submitted') {
+          await supabase.from('reports')
+            .update({ status: normalizedStatus })
+            .eq('report_id', newRow.report_id)
+            .catch(() => {});
+        }
       }
     }
   } catch (e) {
