@@ -330,8 +330,16 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       await refreshProfile().catch(() => {});
       onComplete();
     } catch (cause) {
-      console.log('Onboarding completion note:', cause);
-      onComplete();
+      // Do NOT call onComplete() on failure — show error so user can fix and retry
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      console.warn('Registration error:', msg);
+      setError(
+        msg.includes('already registered') || msg.includes('already been registered')
+          ? 'This email is already registered. Please login instead.'
+          : msg.includes('network') || msg.includes('fetch')
+          ? 'Network error. Please check your internet connection and try again.'
+          : 'Registration failed. Please try again or contact support.'
+      );
     } finally {
       setBusy(false);
     }

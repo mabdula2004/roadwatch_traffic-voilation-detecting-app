@@ -39,11 +39,16 @@ export function App() {
         console.warn('Reports query notice:', error);
       }
 
-      // 2. Fetch base users to map reporter names
+      // 2. Fetch base users + reporter profiles to map reporter names & trust scores
       const { data: users } = await supabase
         .from('base_users')
         .select('user_id, name, email');
       const userMap = new Map((users || []).map((u) => [u.user_id, u.name || u.email]));
+
+      const { data: profiles } = await supabase
+        .from('reporter_profiles')
+        .select('reporter_id, trust_score');
+      const trustMap = new Map((profiles || []).map((p) => [p.reporter_id, p.trust_score ?? 100]));
 
       // 3. Map into clean queue items
       const mapped = (rawReports || []).map((r) => {
@@ -53,6 +58,7 @@ export function App() {
         };
 
         const isDisputed = r.status === 'pending_manual_review' || r.status === 'under_review';
+        const isPending = r.status === 'submitted' || r.status === 'pending_manual_review' || r.status === 'under_review';
         const dateObj = new Date(r.uploaded_at || r.captured_at || Date.now());
         const timeAgo = formatTimeAgo(dateObj);
 
@@ -80,7 +86,7 @@ export function App() {
           violationName: vInfo.name,
           reporterId: r.reporter_id,
           reporterName: userMap.get(r.reporter_id) || 'Verified Citizen',
-          reporterTrust: 95,
+          reporterTrust: trustMap.get(r.reporter_id) ?? 100,
           city: 'Lahore',
           locationName: r.location_name || 'Mall Road Division, Lahore',
           submittedAt: timeAgo,

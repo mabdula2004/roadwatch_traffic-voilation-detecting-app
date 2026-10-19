@@ -224,20 +224,24 @@ export async function uploadEvidenceToStorage(
   let videoUrl: string | null = null;
   const frameUrls: string[] = [];
 
-  // 1. Upload Video MP4 if available
+  // 1. Upload Video MP4 if available (using binary ArrayBuffer, not FormData)
   try {
     if (videoUri) {
       const videoPath = `${clientCaptureId}/video.mp4`;
-      const formData = new FormData();
-      formData.append('file', {
-        uri: videoUri,
-        name: 'video.mp4',
-        type: 'video/mp4',
-      } as any);
+
+      // Read the video file as Base64 then convert to Uint8Array (required by Supabase JS SDK on RN)
+      const videoBase64 = await FileSystem.readAsStringAsync(videoUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const binaryString = atob(videoBase64);
+      const videoBytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        videoBytes[i] = binaryString.charCodeAt(i);
+      }
 
       const { error: vErr } = await supabase.storage
         .from('evidence_vault')
-        .upload(videoPath, formData, {
+        .upload(videoPath, videoBytes.buffer, {
           contentType: 'video/mp4',
           upsert: true,
         });
@@ -335,9 +339,12 @@ export async function uploadReport(
   const generatedId = aiResult?.caseId || `CASE-${Date.now().toString().slice(-6)}`;
   let finalReportId = generatedId;
 
-  // Determine accepted vs rejected based on AI evaluation
+  // AI determines violation detection for local UX only.
+  // All reports go to DB as 'submitted' so they reach the officer dashboard pending queue.
+  // Officer makes the final verdict (accepted / rejected).
   const isAccepted = aiResult ? (aiResult.status === 'fined' && aiResult.violationDetected) : false;
-  const finalStatus = isAccepted ? 'accepted' : 'rejected';
+  const localDisplayStatus = isAccepted ? 'accepted' : 'rejected'; // shown locally in app
+  const dbInsertStatus = 'submitted'; // always submitted to officer queue
 
   let rewardPkr: number | undefined;
   let penaltyPkr: number | undefined;
@@ -419,7 +426,7 @@ export async function uploadReport(
     longitude: clip.longitude,
     locationName: clip.locationName,
     accuracy: clip.accuracy,
-    status: finalStatus,
+    status: localDisplayStatus, // local display uses AI result for UX
     aiResult,
     rewardPkr,
     penaltyPkr,
@@ -464,7 +471,7 @@ export async function uploadReport(
         );
       } catch { }
 
-      // Insert Report into public.reports
+      // Insert Report into public.reports as 'submitted' — awaiting officer verdict
       const { data: insertedReport, error: insertError } = await supabase
         .from('reports')
         .insert({
@@ -476,7 +483,11 @@ export async function uploadReport(
           geo_long: clip.longitude,
           location_accuracy_m: clip.accuracy || 10,
           client_capture_id: validCaptureUuid,
-          status: finalStatus,
+          status: dbInsertStatus, // 'submitted' — lands in officer pending queue
+          ai_verdict: isAccepted ? 'accepted' : 'rejected',
+          ai_confidence: aiResult?.confidence ? Math.round(aiResult.confidence) : null,
+          vehicle_plate: aiResult?.plateNumber || null,
+          location_name: clip.locationName || null,
         })
         .select('report_id')
         .single();
