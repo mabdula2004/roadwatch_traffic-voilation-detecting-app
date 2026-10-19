@@ -10,6 +10,7 @@ import {
   Image,
   Dimensions,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -50,6 +51,7 @@ import {
   getReportFrames,
   deleteReports,
   getDeletedReportIds,
+  saveLocalReport,
 } from '../../lib/report';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
 
@@ -206,7 +208,7 @@ export function Vault() {
           let normStatus = remoteMatch.status;
           if (remoteMatch.status === 'fined') normStatus = 'accepted';
           else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity'].includes(remoteMatch.status)) normStatus = 'rejected';
-          else if (['pending_manual_review', 'under_review'].includes(remoteMatch.status)) normStatus = 'under_review';
+          else if (['pending_manual_review', 'under_review', 'disputed'].includes(remoteMatch.status)) normStatus = 'under_review';
 
           if (remoteMatch.officer_verdict) l.officer_verdict = remoteMatch.officer_verdict;
           if (remoteMatch.officer_note) l.officer_note = remoteMatch.officer_note;
@@ -214,6 +216,25 @@ export function Vault() {
           if (remoteMatch.location_name && !l.location_name) l.location_name = remoteMatch.location_name;
           if (remoteMatch.status && remoteMatch.status !== 'submitted') {
             l.status = normStatus;
+          }
+          if (normStatus === 'accepted') {
+            l.reward_pkr = 200;
+            l.penalty_pkr = undefined;
+          } else if (normStatus === 'rejected') {
+            l.penalty_pkr = 50;
+            l.reward_pkr = undefined;
+          }
+
+          // Persist update to AsyncStorage so local cache is never stale
+          if (matchItem && (remoteMatch.officer_verdict !== matchItem.officerVerdict || normStatus !== matchItem.status)) {
+            void saveLocalReport({
+              ...matchItem,
+              status: normStatus,
+              officerVerdict: remoteMatch.officer_verdict,
+              officerNote: remoteMatch.officer_note,
+              rewardPkr: normStatus === 'accepted' ? 200 : undefined,
+              penaltyPkr: normStatus === 'rejected' ? 50 : undefined,
+            });
           }
         }
 
@@ -299,8 +320,37 @@ export function Vault() {
     }
   }, []);
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await loadReports();
+    setIsRefreshing(false);
+  }, [loadReports]);
+
   useEffect(() => {
     void loadReports();
+
+    // 1. Supabase Realtime Channel — instantly re-fetch when officer updates report status
+    const channel = supabase
+      .channel('vault_reports_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reports' },
+        () => {
+          void loadReports();
+        }
+      )
+      .subscribe();
+
+    // 2. High-reliability polling fallback every 5 seconds while user is on Vault
+    const pollInterval = setInterval(() => {
+      void loadReports();
+    }, 5000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
   }, [loadReports]);
 
   const pending = reports.filter(r => r.status === 'awaiting_upload' || r.status === 'failed');
@@ -403,7 +453,17 @@ export function Vault() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.telemetry}
+            colors={[colors.telemetry]}
+          />
+        }
+      >
         {/* Title & Screen Clean Management Header */}
         <View style={styles.vaultTitleRow}>
           <View style={{ flex: 1 }}>

@@ -8,6 +8,9 @@ import {
   ZoomIn,
   Check,
   X,
+  Video,
+  Camera,
+  Play,
 } from 'lucide-react';
 import { Badge } from './ui/Badge';
 
@@ -19,6 +22,7 @@ export function PendingQueueWorkspace({
 }) {
   const [selectedCaseId, setSelectedCaseId] = useState(cases[0]?.reportId || '');
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
+  const [mediaMode, setMediaMode] = useState('frames'); // 'frames' | 'video'
   const [officerNote, setOfficerNote] = useState('');
   const [zoomModalImage, setZoomModalImage] = useState(null);
 
@@ -155,13 +159,82 @@ export function PendingQueueWorkspace({
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
           {/* Visual Evidence Station (7 cols) */}
           <div className="space-y-4 lg:col-span-7">
+            {/* Media Mode Header Tabs */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('frames')}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                    mediaMode === 'frames'
+                      ? 'bg-accent text-canvas shadow'
+                      : 'border border-edge bg-surface text-muted hover:text-ink'
+                  }`}
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  <span>Keyframes ({frames.length || 0})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('video')}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                    mediaMode === 'video'
+                      ? 'bg-telemetry text-canvas shadow'
+                      : 'border border-edge bg-surface text-muted hover:text-ink'
+                  }`}
+                >
+                  <Video className="h-3.5 w-3.5" />
+                  <span>Full Video MP4 {selectedCase.videoUrl ? '🎬' : ''}</span>
+                </button>
+              </div>
+
+              {selectedCase.videoUrl && mediaMode === 'frames' && (
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('video')}
+                  className="flex items-center gap-1 text-2xs font-semibold text-telemetry hover:underline"
+                >
+                  <Play className="h-3 w-3" />
+                  <span>Play Clip</span>
+                </button>
+              )}
+            </div>
+
             {/* Main Stage Image / Video Viewer */}
             <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-edge bg-black shadow-lg">
-              {currentFrameUri ? (
+              {mediaMode === 'video' ? (
+                selectedCase.videoUrl ? (
+                  <video
+                    key={selectedCase.videoUrl}
+                    controls
+                    autoPlay
+                    playsInline
+                    src={selectedCase.videoUrl}
+                    className="h-full w-full object-contain bg-black"
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center p-6 text-center text-muted">
+                    <Video className="h-10 w-10 text-muted/40" />
+                    <p className="mt-2 text-xs font-bold text-ink">No Recorded Video Clip Available</p>
+                    <p className="mt-1 max-w-xs text-2xs text-muted">
+                      This case has keyframe snapshots available. Click below to inspect keyframe images.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setMediaMode('frames')}
+                      className="mt-3 rounded-lg border border-edge bg-surface px-3 py-1.5 text-2xs font-bold text-accent hover:bg-surface/80"
+                    >
+                      View Extracted Keyframes
+                    </button>
+                  </div>
+                )
+              ) : currentFrameUri ? (
                 <img
                   src={currentFrameUri}
                   alt="Evidence Frame"
-                  className="h-full w-full object-contain cursor-zoom-in"
+                  className="h-full w-full cursor-zoom-in object-contain"
                   onClick={() => setZoomModalImage(currentFrameUri)}
                 />
               ) : (
@@ -172,19 +245,21 @@ export function PendingQueueWorkspace({
               )}
 
               {/* Overlay Badges */}
-              <div className="absolute left-3 top-3 flex items-center gap-2">
-                <span className="rounded bg-black/75 px-2 py-1 text-2xs font-bold text-white backdrop-blur-sm">
-                  FRAME {selectedFrameIndex + 1} OF {frames.length || 1}
-                </span>
-                {selectedFrameIndex === 1 && (
-                  <span className="rounded bg-signal/90 px-2 py-1 text-2xs font-bold text-white shadow-glow-red">
-                    ⚡ VIOLATION MOMENT
+              {mediaMode === 'frames' && (
+                <div className="absolute left-3 top-3 flex items-center gap-2">
+                  <span className="rounded bg-black/75 px-2 py-1 text-2xs font-bold text-white backdrop-blur-sm">
+                    FRAME {selectedFrameIndex + 1} OF {frames.length || 1}
                   </span>
-                )}
-              </div>
+                  {selectedFrameIndex === 1 && (
+                    <span className="shadow-glow-red rounded bg-signal/90 px-2 py-1 text-2xs font-bold text-white">
+                      ⚡ VIOLATION MOMENT
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Zoom Button */}
-              {currentFrameUri && (
+              {mediaMode === 'frames' && currentFrameUri && (
                 <button
                   onClick={() => setZoomModalImage(currentFrameUri)}
                   className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/80 px-2.5 py-1.5 text-2xs font-bold text-white shadow backdrop-blur-sm transition hover:bg-black"
@@ -196,30 +271,51 @@ export function PendingQueueWorkspace({
             </div>
 
             {/* Evidence Frame Thumbnails Selector */}
-            {frames.length > 0 && (
-              <div className="flex items-center gap-3 overflow-x-auto pb-1">
-                {frames.map((fUri, idx) => {
-                  const isSelected = selectedFrameIndex === idx;
-                  const label = idx === 0 ? 'Approach' : idx === 1 ? 'Infraction' : 'Exit Plate';
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedFrameIndex(idx)}
-                      className={`relative flex-1 overflow-hidden rounded-lg border text-left transition-all ${
-                        isSelected
-                          ? 'border-accent ring-2 ring-accent/30 shadow-md'
-                          : 'border-edge opacity-70 hover:opacity-100'
-                      }`}
-                    >
-                      <img src={fUri} alt={label} className="h-16 w-full object-cover" />
-                      <div className="bg-surface/90 px-2 py-1 text-center text-2xs font-bold text-ink">
-                        {label} (#{idx + 1})
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <div className="flex items-center gap-3 overflow-x-auto pb-1">
+              {selectedCase.videoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('video')}
+                  className={`relative flex-1 min-w-[90px] overflow-hidden rounded-lg border text-left transition-all ${
+                    mediaMode === 'video'
+                      ? 'border-telemetry ring-2 ring-telemetry/30 shadow-md'
+                      : 'border-edge opacity-70 hover:opacity-100'
+                  }`}
+                >
+                  <div className="flex h-16 w-full items-center justify-center bg-black/90 text-telemetry">
+                    <Play className="h-6 w-6 fill-current" />
+                  </div>
+                  <div className="bg-surface/90 px-2 py-1 text-center text-2xs font-bold text-ink">
+                    🎬 Video Clip
+                  </div>
+                </button>
+              )}
+
+              {frames.map((fUri, idx) => {
+                const isSelected = mediaMode === 'frames' && selectedFrameIndex === idx;
+                const label = idx === 0 ? 'Approach' : idx === 1 ? 'Infraction' : 'Exit Plate';
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setMediaMode('frames');
+                      setSelectedFrameIndex(idx);
+                    }}
+                    className={`relative flex-1 min-w-[90px] overflow-hidden rounded-lg border text-left transition-all ${
+                      isSelected
+                        ? 'border-accent ring-2 ring-accent/30 shadow-md'
+                        : 'border-edge opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={fUri} alt={label} className="h-16 w-full object-cover" />
+                    <div className="bg-surface/90 px-2 py-1 text-center text-2xs font-bold text-ink">
+                      {label} (#{idx + 1})
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
             {/* Geolocation & Telemetry Strip */}
             <div className="flex items-center justify-between rounded-xl border border-edge bg-surface/40 p-3 text-xs">

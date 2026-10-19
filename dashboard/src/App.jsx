@@ -78,9 +78,18 @@ export function App() {
           if (url2?.publicUrl) frameUris.push(url2.publicUrl);
         }
 
+        let videoUrl = r.video_url || null;
+        if (!videoUrl && r.client_capture_id) {
+          const { data: vData } = supabase.storage
+            .from('evidence_vault')
+            .getPublicUrl(`${r.client_capture_id}/video.mp4`);
+          if (vData?.publicUrl) videoUrl = vData.publicUrl;
+        }
+
         return {
           reportId: r.report_id || r.client_capture_id || `RW-${Math.floor(10000 + Math.random() * 90000)}`,
           caseId: r.case_id || `CASE-${dateObj.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+          videoUrl,
           plateNumber: r.plate_number || r.vehicle_plate || 'LEA-4471',
           violationType: r.claimed_class || 'traffic_violation',
           violationName: vInfo.name,

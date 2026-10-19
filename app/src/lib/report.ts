@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
-import { supabase } from './supabase';
+import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 import { AiEvidentiaryResult } from './aiAnalysis';
 import { rechargeWalletBalance, deductWalletBalance } from './wallet';
 
@@ -252,29 +252,61 @@ export async function uploadEvidenceToStorage(
   let videoUrl: string | null = null;
   const frameUrls: string[] = [];
 
-  // 1. Upload Video MP4 — use fetch(uri).blob() which is the correct Expo + Supabase pattern.
-  //    Note: "Response.blob() using React Native Blob" warning is harmless — upload works fine.
+  // 1. Upload Video MP4 — use native FileSystem.uploadAsync first (fast native binary stream, zero React Native Blob overhead)
   try {
     if (videoUri) {
       const videoPath = `${clientCaptureId}/video.mp4`;
+      let uploadSucceeded = false;
 
-      const response = await fetch(videoUri);
-      const blob = await response.blob();
+      // Try native binary upload first
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        const token = session?.session?.access_token || supabaseAnonKey;
+        const uploadUrl = `${supabaseUrl}/storage/v1/object/evidence_vault/${videoPath}`;
 
-      const { error: vErr } = await supabase.storage
-        .from('evidence_vault')
-        .upload(videoPath, blob, {
-          contentType: 'video/mp4',
-          upsert: true,
+        const uploadResult = await FileSystem.uploadAsync(uploadUrl, videoUri, {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${token}`,
+            'x-upsert': 'true',
+            'Content-Type': 'video/mp4',
+          },
         });
 
-      if (!vErr) {
-        const { data: pubUrl } = supabase.storage
+        if (uploadResult.status === 200 || uploadResult.status === 201) {
+          uploadSucceeded = true;
+          const { data: pubUrl } = supabase.storage
+            .from('evidence_vault')
+            .getPublicUrl(videoPath);
+          videoUrl = pubUrl?.publicUrl || null;
+        }
+      } catch (nativeErr) {
+        console.log('Native upload fallback to standard:', nativeErr);
+      }
+
+      // Standard fallback with explicit video/mp4 type
+      if (!uploadSucceeded) {
+        const response = await fetch(videoUri);
+        const rawBlob = await response.blob();
+        const videoBlob = rawBlob.slice(0, rawBlob.size, 'video/mp4');
+
+        const { error: vErr } = await supabase.storage
           .from('evidence_vault')
-          .getPublicUrl(videoPath);
-        videoUrl = pubUrl?.publicUrl || null;
-      } else {
-        console.warn('Supabase video upload notice:', vErr.message);
+          .upload(videoPath, videoBlob, {
+            contentType: 'video/mp4',
+            upsert: true,
+          });
+
+        if (!vErr) {
+          const { data: pubUrl } = supabase.storage
+            .from('evidence_vault')
+            .getPublicUrl(videoPath);
+          videoUrl = pubUrl?.publicUrl || null;
+        } else {
+          console.warn('Supabase video upload notice:', vErr.message);
+        }
       }
     }
   } catch (err) {
