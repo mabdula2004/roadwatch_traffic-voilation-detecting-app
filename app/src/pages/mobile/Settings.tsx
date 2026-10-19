@@ -20,6 +20,7 @@ import {
   ChevronRight,
   LogOut,
   TrendingUp,
+  TrendingDown,
 } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 import { useUserProfile } from '../../contexts/UserContext';
@@ -52,29 +53,67 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
     let alive = true;
     async function load() {
       try {
+        const { data: auth } = await supabase.auth.getUser();
+        const userId = auth?.user?.id;
+
         const [reporter, reports] = await Promise.all([
-          supabase.from('reporter_profiles').select('trust_score').maybeSingle(),
-          supabase.from('reports').select('status').in('status', ['accepted', 'rejected']),
+          userId
+            ? supabase.from('reporter_profiles').select('trust_score').eq('reporter_id', userId).maybeSingle()
+            : supabase.from('reporter_profiles').select('trust_score').maybeSingle(),
+          supabase.from('reports').select('status').in('status', ['accepted', 'approved', 'rejected']),
         ]);
+
         if (alive) {
-          if (!reporter.error && reporter.data?.trust_score !== null && reporter.data?.trust_score !== undefined) {
-            setTrustScore(reporter.data.trust_score);
-          } else {
-            setTrustScore(100);
+          const approvedCount = reports.data
+            ? reports.data.filter((r) => r.status === 'accepted' || r.status === 'approved').length
+            : 0;
+          const rejectedCount = reports.data
+            ? reports.data.filter((r) => r.status === 'rejected').length
+            : 0;
+          const totalResolved = approvedCount + rejectedCount;
+
+          setStats({
+            approved: approvedCount,
+            rejected: rejectedCount,
+          });
+
+          // Dynamic calculation: If reporter has reviewed reports, Trust Score matches their genuine accuracy!
+          let finalScore = 100;
+          if (totalResolved > 0) {
+            finalScore = Math.max(0, Math.min(100, Math.round((approvedCount / totalResolved) * 100)));
+          } else if (!reporter.error && reporter.data?.trust_score !== null && reporter.data?.trust_score !== undefined) {
+            finalScore = reporter.data.trust_score;
           }
-          if (!reports.error && reports.data) {
-            setStats({
-              approved: reports.data.filter(r => r.status === 'accepted').length,
-              rejected: reports.data.filter(r => r.status === 'rejected').length,
-            });
+
+          setTrustScore(finalScore);
+
+          // Sync computed score back to Supabase reporter_profiles
+          if (userId && (!reporter.data || reporter.data.trust_score !== finalScore)) {
+            void supabase
+              .from('reporter_profiles')
+              .update({ trust_score: finalScore })
+              .eq('reporter_id', userId);
           }
         }
       } catch {
         if (alive) setTrustScore(100);
       }
     }
+
     void load();
-    return () => { alive = false; };
+
+    // Real-time synchronization: Re-computes instantly when traffic officer accepts or rejects!
+    const channel = supabase
+      .channel('settings-trust-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => {
+        void load();
+      })
+      .subscribe();
+
+    return () => {
+      alive = false;
+      void supabase.removeChannel(channel);
+    };
   }, []);
   useEffect(() => {
     let alive = true;
@@ -142,17 +181,40 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
         {/* Hero Trust Score */}
         <View style={[styles.trustCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
           <View style={styles.trustTop}>
-            <View style={[styles.scoreCircle, { borderColor: colors.telemetry }]}>
-              <Text style={[styles.scoreNumber, { color: colors.ink }]}>{trustScore ?? '—'}</Text>
-              <Text style={[styles.scoreLabel, { color: colors.telemetry }]}>SCORE</Text>
+            <View style={[
+              styles.scoreCircle,
+              {
+                borderColor: trustScore >= 70 ? colors.telemetry : (trustScore >= 40 ? '#f59e0b' : '#ef4444'),
+                backgroundColor: trustScore < 40 ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+              }
+            ]}>
+              <Text style={[
+                styles.scoreNumber,
+                { color: trustScore >= 70 ? colors.ink : (trustScore >= 40 ? '#f59e0b' : '#ef4444') }
+              ]}>{trustScore ?? '—'}</Text>
+              <Text style={[
+                styles.scoreLabel,
+                { color: trustScore >= 70 ? colors.telemetry : (trustScore >= 40 ? '#f59e0b' : '#ef4444') }
+              ]}>SCORE</Text>
             </View>
             <View style={styles.trustInfo}>
               <Text style={[styles.reporterTrustLabel, { color: colors.muted }]}>{t('reporterTrust')}</Text>
               <Text style={[styles.trustTitle, { color: colors.ink }]}>{t('reporterTrustTitle')}</Text>
               <Text style={[styles.trustDesc, { color: colors.muted }]}>{t('trustScoreDesc')}</Text>
               <View style={styles.trendingRow}>
-                <TrendingUp size={14} color={colors.valid} />
-                <Text style={[styles.trendingText, { color: colors.valid }]}>{t('currentScore')}</Text>
+                {trustScore >= 70 ? (
+                  <>
+                    <TrendingUp size={14} color={colors.valid} />
+                    <Text style={[styles.trendingText, { color: colors.valid }]}>{t('currentScore')}</Text>
+                  </>
+                ) : (
+                  <>
+                    <TrendingDown size={14} color="#ef4444" />
+                    <Text style={[styles.trendingText, { color: '#ef4444' }]}>
+                      {trustScore < 40 ? (isUrdu ? 'توجہ طلب' : 'Action Needed') : (isUrdu ? 'اوسط سے کم' : 'Below Average')}
+                    </Text>
+                  </>
+                )}
               </View>
             </View>
           </View>
@@ -168,7 +230,12 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
             </View>
             <View style={styles.statItem}>
               <Text style={[styles.statItemLabel, { color: colors.muted }]}>{t('accuracy')}</Text>
-              <Text style={[styles.statItemVal, { color: colors.ink }]}>{stats.approved + stats.rejected ? `${Math.round(stats.approved / (stats.approved + stats.rejected) * 100)}%` : '—'}</Text>
+              <Text style={[
+                styles.statItemVal,
+                { color: (stats.approved + stats.rejected > 0 && Math.round((stats.approved / (stats.approved + stats.rejected)) * 100) < 50) ? '#ef4444' : colors.ink }
+              ]}>
+                {stats.approved + stats.rejected ? `${Math.round((stats.approved / (stats.approved + stats.rejected)) * 100)}%` : '—'}
+              </Text>
             </View>
           </View>
         </View>
