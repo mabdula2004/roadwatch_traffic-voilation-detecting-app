@@ -533,8 +533,8 @@
       </tr>
       <tr>
         <td><strong>Section 2</strong></td>
-        <td>Ecosystem User Roles & Personas</td>
-        <td>Citizen, Officer, Violator</td>
+        <td>System Application Roles (Reporter & Officer)</td>
+        <td>Mobile Reporter & Desk Officer</td>
       </tr>
       <tr>
         <td><strong>Section 3</strong></td>
@@ -585,19 +585,19 @@
   <!-- SECTION 2: ROLES & PERSONAS -->
   <div class="page-break"></div>
 
-  <h1><span class="icon">👥</span> Ecosystem User Roles & Personas</h1>
+  <h1><span class="icon">👥</span> System Application User Roles</h1>
   <p>
-    The RoadWatch ecosystem operates on three primary operational roles and one autonomous background engine. All verification, dispute adjudication, and audit logging are unified within the single Officer Command Web Dashboard.
+    The RoadWatch software platform is architected around <strong>two primary application user roles</strong> and one autonomous backend engine. Offending drivers are external subjects of citations and do not hold software accounts.
   </p>
 
-  <div class="roles-grid avoid-break" style="grid-template-columns: repeat(3, 1fr);">
+  <div class="roles-grid avoid-break" style="grid-template-columns: repeat(2, 1fr);">
     <div class="role-card">
       <div class="role-header">
-        <span class="role-title">📱 1. Citizen Reporter</span>
+        <span class="role-title">📱 1. Reporter (Citizen Mobile App)</span>
         <span class="badge badge-blue">Role: reporter</span>
       </div>
       <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
-        Registered everyday pedestrians, commuters, and vehicle passengers utilizing the Expo mobile app.
+        Registered citizen observer capturing and submitting verified road violations via the mobile app.
       </p>
       <ul class="role-list">
         <li>Registers with Phone OTP & 13-digit Pakistani CNIC (SHA-256 hashed).</li>
@@ -612,7 +612,7 @@
 
     <div class="role-card">
       <div class="role-header">
-        <span class="role-title">👮 2. Traffic Police Officer</span>
+        <span class="role-title">👮 2. Traffic Police Officer (Command Dashboard)</span>
         <span class="badge badge-green">Role: officer</span>
       </div>
       <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
@@ -631,22 +631,11 @@
         <li>Utilizes rapid keyboard hotkeys (<code>A</code>, <code>R</code>, <code>Space</code>, <code>J</code>, <code>K</code>).</li>
       </ul>
     </div>
+  </div>
 
-    <div class="role-card">
-      <div class="role-header">
-        <span class="role-title">🚗 3. Vehicle Offender</span>
-        <span class="badge badge-amber">Role: offender</span>
-      </div>
-      <p style="font-size: 8.3pt; color: #475569; margin-bottom: 6px;">
-        The registered vehicle owner or driver committing infractions on public thoroughfares.
-      </p>
-      <ul class="role-list">
-        <li>Subject of legal traffic citations resulting from accepted reports.</li>
-        <li>Protected by constitutional human-in-the-loop audit safeguards.</li>
-        <li>Receives official citations containing authenticated video & keyframe proof.</li>
-        <li>Retains standard municipal statutory rights of appeal in traffic court.</li>
-      </ul>
-    </div>
+  <div class="callout info avoid-break" style="margin-top: 4px;">
+    <strong>Note on Traffic Violators (Offenders):</strong><br>
+    The vehicle owner or driver who commits the violation is the external recipient of official traffic citations. Violators do not have application user accounts, screens, or login interfaces in the RoadWatch software; their citations are officially processed by the municipal traffic police department.
   </div>
 
   <h2>Role-Based Access Control (RBAC) Matrix</h2>

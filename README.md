@@ -37,12 +37,12 @@
 
 ## 👥 User Roles & Ecosystem Personas
 
-To prevent ambiguity, RoadWatch defines **three distinct operational roles** in the ecosystem, supported by an autonomous backend engine:
+To prevent ambiguity, the RoadWatch software ecosystem is architected around **two primary application user roles**, powered by an autonomous backend engine:
 
 ```mermaid
 graph LR
-    subgraph Citizens["📱 Citizens / Reporters"]
-        C1[Citizen On Road]
+    subgraph Reporters["📱 Citizen Reporters"]
+        C1[Reporter on Mobile App]
     end
 
     subgraph SystemAI["⚡ Core Engine"]
@@ -54,20 +54,16 @@ graph LR
         O1[Traffic Police Officer<br>(Unified Command & Audit Desk)]
     end
 
-    subgraph Offenders["🚗 Traffic Offenders"]
-        V1[Vehicle Driver]
-    end
-
     C1 -->|Captures 10s Clip| S1
     S1 -->|Validates & Dispatches| S2
     S2 -->|Live Stream| O1
-    O1 -->|Accepts Citation| V1
+    O1 -->|Accepts Citation| S2
     O1 -->|Credits Reward Bounty| C1
     O1 -->|Penalizes Fake Claims| C1
     O1 -->|Audits History & Appeals| S2
 ```
 
-### 1. 📱 Citizen Reporter (`reporter`)
+### 1. 📱 Reporter (`reporter`)
 - **Who they are:** Any everyday citizen, driver, pedestrian, or commuter registered on the mobile application.
 - **Primary Objectives:** Safely record dangerous traffic violations, submit genuine video evidence, track citation status, earn civic bounties, and maintain a high personal Trust Score.
 - **Capabilities & Actions:**
@@ -100,11 +96,9 @@ graph LR
 
 ---
 
-### 3. 🚗 Vehicle Offender / Violator (`offender`)
-- **Who they are:** The driver or vehicle owner who committed the traffic offense on public roads.
-- **Role in System:**
-  - Subject of the citation issued post-human officer approval.
-  - **Guaranteed Human Review:** RoadWatch enforces a strict policy that **no automated fine is issued solely by AI**. An authorized human traffic officer must inspect the video evidence and confirm the violation before an official citation is finalized.
+> [!NOTE]
+> **Traffic Violators (Offenders):**
+> The vehicle owner or driver who commits the traffic violation is the external recipient of official police traffic citations. Violators do not have application user accounts, screens, or login interfaces in the RoadWatch software; their citations are officially processed by the municipal traffic police department.
 
 ---
 
