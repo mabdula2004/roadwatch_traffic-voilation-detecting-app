@@ -52,6 +52,7 @@ export interface AiEvidentiaryResult {
 }
 
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '';
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen3-vl-8b-instruct';
 
 const COMPACT_VIOLATION_TAXONOMY =
@@ -288,6 +289,100 @@ async function callOpenRouterVision(
   }
 }
 
+/**
+ * Executes a high-speed, high-accuracy vision analysis call using native Google Gemini API
+ */
+async function callGeminiVision(
+  prompt: string,
+  framesBase64: string[],
+  maxTokens: number = 600
+): Promise<{ ok: boolean; parsed?: any; error?: string }> {
+  try {
+    const key = GEMINI_API_KEY;
+    if (!key) return { ok: false, error: 'No Gemini API key configured' };
+
+    const parts: any[] = [{ text: prompt }];
+    for (const b64 of framesBase64) {
+      const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: cleanB64,
+        },
+      });
+    }
+
+    const models = ['gemini-flash-lite-latest', 'gemini-3.8-flash', 'gemini-flash-latest'];
+    let lastError = '';
+
+    for (const m of models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${key}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.1,
+              maxOutputTokens: maxTokens,
+            },
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (raw) {
+            const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleaned);
+            return { ok: true, parsed };
+          }
+        } else {
+          const errText = await res.text();
+          lastError = `HTTP ${res.status}: ${errText.slice(0, 100)}`;
+          if (res.status === 503 || res.status === 429) continue;
+        }
+      } catch (err: any) {
+        lastError = err?.message || String(err);
+      }
+    }
+
+    return { ok: false, error: lastError };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Unified Vision AI caller: executes Google Gemini first, falls back to OpenRouter
+ */
+async function callVisionAI(
+  prompt: string,
+  framesBase64: string[],
+  maxTokens: number = 500
+): Promise<{ ok: boolean; parsed?: any; is402?: boolean; error?: string }> {
+  // 1. Prioritize Google Gemini (zero 429 congestion, sub-second latency)
+  if (GEMINI_API_KEY) {
+    const geminiRes = await callGeminiVision(prompt, framesBase64, maxTokens);
+    if (geminiRes.ok && geminiRes.parsed) {
+      return geminiRes;
+    }
+    console.warn('Gemini vision notice, falling back to OpenRouter:', geminiRes.error);
+  }
+
+  // 2. Fallback to OpenRouter (Qwen)
+  const openRouterContent: any[] = [{ type: 'text', text: prompt }];
+  for (const f of framesBase64) {
+    openRouterContent.push({
+      type: 'image_url',
+      image_url: { url: f.startsWith('data:') ? f : `data:image/jpeg;base64,${f}` },
+    });
+  }
+  return callOpenRouterVision(openRouterContent, maxTokens);
+}
+
   const cropNote = params.cropZoom && params.cropZoom > 1
     ? `\nNote: Framing zoom applied by citizen (${params.cropLabel || 'Focused'}, ${params.cropZoom}x magnification). Focus directly on target vehicle and violation in central frame.`
     : '';
@@ -340,12 +435,12 @@ Output ONLY valid JSON:
   ];
 
   let isCreditLimitError = false;
-  let stage1Result = await callOpenRouterVision(stage1Content);
+  let stage1Result = await callVisionAI(stage1Prompt, [primaryFrame]);
 
   // Quick retry once if network glitch
   if (!stage1Result.ok && !stage1Result.is402) {
     await new Promise(r => setTimeout(r, 800));
-    stage1Result = await callOpenRouterVision(stage1Content);
+    stage1Result = await callVisionAI(stage1Prompt, [primaryFrame]);
   }
 
   if (stage1Result.is402) {
@@ -408,10 +503,7 @@ Output ONLY JSON:
   "plate_confidence": number,
   "confirms_violation": boolean
 }`;
-      const stage2Result = await callOpenRouterVision([
-        { type: 'text', text: platePrompt },
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${exitFrame}` } },
-      ]);
+      const stage2Result = await callVisionAI(platePrompt, [exitFrame]);
 
       if (stage2Result.ok && stage2Result.parsed) {
         if (stage2Result.parsed.plate_number && stage2Result.parsed.plate_status === 'clear') {
