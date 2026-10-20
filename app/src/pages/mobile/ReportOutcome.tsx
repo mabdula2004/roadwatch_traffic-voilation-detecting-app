@@ -797,9 +797,18 @@ export function ReportOutcome({
 
         {/* Bottom Actions */}
         <View style={styles.actionContainer}>
-          <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.telemetry }]} onPress={onGoToVault}>
+          <TouchableOpacity
+            style={[styles.primaryBtn, { backgroundColor: isFined ? '#10b981' : colors.telemetry }]}
+            onPress={onGoToVault}
+          >
             <HardDrive size={18} color="#000" />
-            <Text style={styles.primaryBtnText}>{isUrdu ? 'شواہد والٹ پر جائیں' : 'Proceed to Evidence Vault'}</Text>
+            <Text style={styles.primaryBtnText}>
+              {isFined
+                ? (isUrdu ? 'ثبوت سیل کریں اور والٹ میں محفوظ کریں (+200 انعام)' : 'Seal Citation & Save to Vault (+PKR 200 Bounty)')
+                : isManualSubmitted
+                ? (isUrdu ? 'وارڈن تفتیش والٹ میں دیکھیں' : 'View Officer Audit Case in Vault')
+                : (isUrdu ? 'والٹ میں محفوظ کریں (-50 جرمانہ)' : 'Acknowledge & Close to Vault (-PKR 50 Penalty)')}
+            </Text>
             <ChevronRight size={18} color="#000" />
           </TouchableOpacity>
 

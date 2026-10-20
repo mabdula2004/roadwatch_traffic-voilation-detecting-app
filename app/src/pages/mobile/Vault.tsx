@@ -52,6 +52,7 @@ import {
   deleteReports,
   getDeletedReportIds,
   saveLocalReport,
+  resolveCanonicalReportStatus,
 } from '../../lib/report';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
 
@@ -142,20 +143,13 @@ export function Vault() {
       const formattedLocal: ReportRow[] = await Promise.all(
         filteredLocalList.map(async (item) => {
           const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris);
-          let normStatus: 'accepted' | 'under_review' | 'rejected' = 'rejected';
-          if (item.officerVerdict === 'accepted' || item.status === 'accepted' || item.status === 'fined') {
-            normStatus = 'accepted';
-          } else if (item.officerVerdict === 'rejected') {
-            normStatus = 'rejected';
-          } else if (['pending_manual_review', 'under_review', 'disputed'].includes(item.status)) {
-            normStatus = 'under_review';
-          } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(item.status)) {
-            normStatus = 'rejected';
-          } else if (item.status === 'submitted') {
-            normStatus = (item.penaltyPkr || item.aiResult?.violationDetected === false || item.aiResult?.status === 'no_violation') ? 'rejected' : 'under_review';
-          } else {
-            normStatus = 'rejected';
-          }
+          const normStatus = resolveCanonicalReportStatus({
+            status: item.status,
+            officerVerdict: item.officerVerdict,
+            aiResult: item.aiResult,
+            penaltyPkr: item.penaltyPkr,
+            rewardPkr: item.rewardPkr,
+          });
 
           return {
             report_id: item.reportId,
@@ -165,8 +159,8 @@ export function Vault() {
             geo_lat: item.latitude,
             geo_long: item.longitude,
             location_name: item.locationName,
-            reward_pkr: item.rewardPkr,
-            penalty_pkr: item.penaltyPkr,
+            reward_pkr: normStatus === 'accepted' ? 200 : undefined,
+            penalty_pkr: normStatus === 'rejected' ? 50 : undefined,
             plate_number: item.aiResult?.plateNumber || undefined,
             officer_verdict: item.officerVerdict,
             review_fee_refunded: item.reviewFeeRefunded,
@@ -220,18 +214,14 @@ export function Vault() {
         );
 
         if (remoteMatch) {
-          let normStatus: 'accepted' | 'under_review' | 'rejected' = l.status as any;
-          if (remoteMatch.officer_verdict === 'accepted' || remoteMatch.status === 'accepted' || remoteMatch.status === 'fined') {
-            normStatus = 'accepted';
-          } else if (remoteMatch.officer_verdict === 'rejected') {
-            normStatus = 'rejected';
-          } else if (['pending_manual_review', 'under_review', 'disputed'].includes(remoteMatch.status)) {
-            normStatus = 'under_review';
-          } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(remoteMatch.status) || remoteMatch.ai_verdict === 'rejected') {
-            normStatus = 'rejected';
-          } else if (remoteMatch.status === 'submitted') {
-            normStatus = (remoteMatch.ai_verdict === 'rejected' || l.penalty_pkr || l.status === 'rejected') ? 'rejected' : 'under_review';
-          }
+          const normStatus = resolveCanonicalReportStatus({
+            status: remoteMatch.status,
+            officer_verdict: remoteMatch.officer_verdict,
+            ai_verdict: remoteMatch.ai_verdict,
+            aiResult: l.ai_result,
+            penaltyPkr: l.penalty_pkr,
+            rewardPkr: l.reward_pkr,
+          });
 
           if (remoteMatch.officer_verdict) l.officer_verdict = remoteMatch.officer_verdict;
           if (remoteMatch.officer_note) l.officer_note = remoteMatch.officer_note;
@@ -271,18 +261,11 @@ export function Vault() {
         if (!alreadyInLocal) {
           seen.add(r.report_id);
           if (r.client_capture_id) seen.add(r.client_capture_id);
-          let normStatus: 'accepted' | 'under_review' | 'rejected' = 'rejected';
-          if (r.officer_verdict === 'accepted' || r.status === 'accepted' || r.status === 'fined') {
-            normStatus = 'accepted';
-          } else if (r.officer_verdict === 'rejected') {
-            normStatus = 'rejected';
-          } else if (['pending_manual_review', 'under_review', 'disputed'].includes(r.status)) {
-            normStatus = 'under_review';
-          } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(r.status) || r.ai_verdict === 'rejected') {
-            normStatus = 'rejected';
-          } else if (r.status === 'submitted') {
-            normStatus = r.ai_verdict === 'accepted' ? 'accepted' : 'rejected';
-          }
+          const normStatus = resolveCanonicalReportStatus({
+            status: r.status,
+            officer_verdict: r.officer_verdict,
+            ai_verdict: r.ai_verdict,
+          });
 
           combined.push({
             report_id: r.report_id,
@@ -1187,15 +1170,15 @@ export function Vault() {
                       style={[
                         styles.thresholdValue,
                         {
-                          color: selectedReport.status === 'accepted'
+                          color: (selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected))
                             ? '#10b981'
                             : selectedReport.status === 'under_review' || selectedReport.status === 'pending_manual_review'
                             ? '#f59e0b'
-                            : colors.muted,
+                            : '#ef4444',
                         },
                       ]}
                     >
-                      {selectedReport.status === 'accepted'
+                      {(selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected))
                         ? 'YES'
                         : selectedReport.status === 'under_review' || selectedReport.status === 'pending_manual_review'
                         ? 'AUDITING'

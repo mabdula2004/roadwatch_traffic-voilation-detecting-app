@@ -81,6 +81,65 @@ export interface PenaltyCitation {
   plateNumber?: string;
 }
 
+export type CanonicalReportStatus = 'accepted' | 'under_review' | 'rejected';
+
+/**
+ * Authoritative status resolver for RoadWatch reports across mobile app & database sync.
+ *
+ * Rules hierarchy:
+ * 1. Certified Officer final verdict from dashboard ALWAYS takes supreme priority (accepted / rejected).
+ * 2. Active human dispute (citizen explicitly paid PKR 100 review fee) -> 'under_review'.
+ * 3. AI Confirmed / Accepted Violation -> ALWAYS 'accepted' (+PKR 200 bounty reward).
+ * 4. Otherwise -> uncontested invalid submission -> 'rejected' (-PKR 50 penalty).
+ */
+export function resolveCanonicalReportStatus(r: {
+  status?: string | null;
+  officer_verdict?: string | null;
+  officerVerdict?: string | null;
+  ai_verdict?: string | null;
+  aiResult?: any;
+  ai_result?: any;
+  penaltyPkr?: number;
+  penalty_pkr?: number;
+  rewardPkr?: number;
+  reward_pkr?: number;
+}): CanonicalReportStatus {
+  // 1. Certified Officer final verdict from dashboard
+  const officerVerdict = r.officer_verdict || r.officerVerdict;
+  if (officerVerdict === 'accepted') return 'accepted';
+  if (officerVerdict === 'rejected') return 'rejected';
+
+  // 2. Active human review / dispute (citizen explicitly paid PKR 100 fee)
+  const rawStatus = r.status;
+  if (
+    rawStatus === 'under_review' ||
+    rawStatus === 'pending_manual_review' ||
+    rawStatus === 'disputed'
+  ) {
+    return 'under_review';
+  }
+
+  // 3. AI Confirmed / Accepted Violation -> ALWAYS APPROVED!
+  const aiRes = r.aiResult || r.ai_result;
+  const isAiFined = Boolean(
+    aiRes &&
+    aiRes.status === 'fined' &&
+    aiRes.violationDetected
+  );
+  const isAiAccepted = r.ai_verdict === 'accepted' || isAiFined;
+
+  if (
+    rawStatus === 'accepted' ||
+    rawStatus === 'fined' ||
+    isAiAccepted
+  ) {
+    return 'accepted';
+  }
+
+  // 4. Otherwise, it is an uncontested rejected / invalid clip (penalty fine applies)
+  return 'rejected';
+}
+
 async function getActiveUserId(): Promise<string | null> {
   try {
     const { data } = await supabase.auth.getUser();
@@ -660,23 +719,18 @@ export async function getLocalReports(): Promise<StoredCaseReport[]> {
       .filter(r => !deletedIds.has(r.reportId) && !deletedIds.has(r.clientCaptureId))
       .filter(r => !currentUid || !r.reporterId || r.reporterId === currentUid)
       .map(r => {
-        let normStatus = r.status;
-        if (r.officerVerdict === 'accepted' || r.status === 'fined' || r.status === 'accepted') {
-          normStatus = 'accepted';
-        } else if (r.officerVerdict === 'rejected') {
-          normStatus = 'rejected';
-        } else if (['pending_manual_review', 'under_review', 'disputed'].includes(r.status)) {
-          normStatus = 'under_review';
-        } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(r.status)) {
-          normStatus = 'rejected';
-        } else if (r.status === 'submitted') {
-          normStatus = (r.penaltyPkr || r.aiResult?.violationDetected === false || r.aiResult?.status === 'no_violation') ? 'rejected' : 'under_review';
-        } else {
-          normStatus = 'rejected';
-        }
+        const normStatus = resolveCanonicalReportStatus({
+          status: r.status,
+          officerVerdict: r.officerVerdict,
+          aiResult: r.aiResult,
+          penaltyPkr: r.penaltyPkr,
+          rewardPkr: r.rewardPkr,
+        });
         return {
           ...sanitizeReportForStorage(r),
           status: normStatus,
+          rewardPkr: normStatus === 'accepted' ? 200 : undefined,
+          penaltyPkr: normStatus === 'rejected' ? 50 : undefined,
         };
       });
   } catch {
