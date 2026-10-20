@@ -661,9 +661,19 @@ export async function getLocalReports(): Promise<StoredCaseReport[]> {
       .filter(r => !currentUid || !r.reporterId || r.reporterId === currentUid)
       .map(r => {
         let normStatus = r.status;
-        if (r.status === 'fined') normStatus = 'accepted';
-        else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity'].includes(r.status)) normStatus = 'rejected';
-        else if (['pending_manual_review', 'under_review', 'disputed'].includes(r.status)) normStatus = 'under_review';
+        if (r.officerVerdict === 'accepted' || r.status === 'fined' || r.status === 'accepted') {
+          normStatus = 'accepted';
+        } else if (r.officerVerdict === 'rejected') {
+          normStatus = 'rejected';
+        } else if (['pending_manual_review', 'under_review', 'disputed'].includes(r.status)) {
+          normStatus = 'under_review';
+        } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(r.status)) {
+          normStatus = 'rejected';
+        } else if (r.status === 'submitted') {
+          normStatus = (r.penaltyPkr || r.aiResult?.violationDetected === false || r.aiResult?.status === 'no_violation') ? 'rejected' : 'under_review';
+        } else {
+          normStatus = 'rejected';
+        }
         return {
           ...sanitizeReportForStorage(r),
           status: normStatus,

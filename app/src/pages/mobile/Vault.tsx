@@ -142,11 +142,26 @@ export function Vault() {
       const formattedLocal: ReportRow[] = await Promise.all(
         filteredLocalList.map(async (item) => {
           const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris);
+          let normStatus: 'accepted' | 'under_review' | 'rejected' = 'rejected';
+          if (item.officerVerdict === 'accepted' || item.status === 'accepted' || item.status === 'fined') {
+            normStatus = 'accepted';
+          } else if (item.officerVerdict === 'rejected') {
+            normStatus = 'rejected';
+          } else if (['pending_manual_review', 'under_review', 'disputed'].includes(item.status)) {
+            normStatus = 'under_review';
+          } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(item.status)) {
+            normStatus = 'rejected';
+          } else if (item.status === 'submitted') {
+            normStatus = (item.penaltyPkr || item.aiResult?.violationDetected === false || item.aiResult?.status === 'no_violation') ? 'rejected' : 'under_review';
+          } else {
+            normStatus = 'rejected';
+          }
+
           return {
             report_id: item.reportId,
             claimed_class: item.claimedClass,
             captured_at: item.capturedAt,
-            status: item.status,
+            status: normStatus,
             geo_lat: item.latitude,
             geo_long: item.longitude,
             location_name: item.locationName,
@@ -205,18 +220,24 @@ export function Vault() {
         );
 
         if (remoteMatch) {
-          let normStatus = remoteMatch.status;
-          if (remoteMatch.status === 'fined') normStatus = 'accepted';
-          else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity'].includes(remoteMatch.status)) normStatus = 'rejected';
-          else if (['pending_manual_review', 'under_review', 'disputed'].includes(remoteMatch.status)) normStatus = 'under_review';
+          let normStatus: 'accepted' | 'under_review' | 'rejected' = l.status as any;
+          if (remoteMatch.officer_verdict === 'accepted' || remoteMatch.status === 'accepted' || remoteMatch.status === 'fined') {
+            normStatus = 'accepted';
+          } else if (remoteMatch.officer_verdict === 'rejected') {
+            normStatus = 'rejected';
+          } else if (['pending_manual_review', 'under_review', 'disputed'].includes(remoteMatch.status)) {
+            normStatus = 'under_review';
+          } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(remoteMatch.status) || remoteMatch.ai_verdict === 'rejected') {
+            normStatus = 'rejected';
+          } else if (remoteMatch.status === 'submitted') {
+            normStatus = (remoteMatch.ai_verdict === 'rejected' || l.penalty_pkr || l.status === 'rejected') ? 'rejected' : 'under_review';
+          }
 
           if (remoteMatch.officer_verdict) l.officer_verdict = remoteMatch.officer_verdict;
           if (remoteMatch.officer_note) l.officer_note = remoteMatch.officer_note;
           if (remoteMatch.vehicle_plate && !l.plate_number) l.plate_number = remoteMatch.vehicle_plate;
           if (remoteMatch.location_name && !l.location_name) l.location_name = remoteMatch.location_name;
-          if (remoteMatch.status && remoteMatch.status !== 'submitted') {
-            l.status = normStatus;
-          }
+          l.status = normStatus;
           if (normStatus === 'accepted') {
             l.reward_pkr = 200;
             l.penalty_pkr = undefined;
@@ -250,10 +271,18 @@ export function Vault() {
         if (!alreadyInLocal) {
           seen.add(r.report_id);
           if (r.client_capture_id) seen.add(r.client_capture_id);
-          let normStatus = r.status;
-          if (r.status === 'fined') normStatus = 'accepted';
-          else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity'].includes(r.status)) normStatus = 'rejected';
-          else if (['pending_manual_review', 'under_review'].includes(r.status)) normStatus = 'under_review';
+          let normStatus: 'accepted' | 'under_review' | 'rejected' = 'rejected';
+          if (r.officer_verdict === 'accepted' || r.status === 'accepted' || r.status === 'fined') {
+            normStatus = 'accepted';
+          } else if (r.officer_verdict === 'rejected') {
+            normStatus = 'rejected';
+          } else if (['pending_manual_review', 'under_review', 'disputed'].includes(r.status)) {
+            normStatus = 'under_review';
+          } else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity', 'rejected'].includes(r.status) || r.ai_verdict === 'rejected') {
+            normStatus = 'rejected';
+          } else if (r.status === 'submitted') {
+            normStatus = r.ai_verdict === 'accepted' ? 'accepted' : 'rejected';
+          }
 
           combined.push({
             report_id: r.report_id,
@@ -356,18 +385,25 @@ export function Vault() {
   const pending = reports.filter(r => r.status === 'awaiting_upload' || r.status === 'failed');
   const sealed = reports.filter(r => !pending.includes(r));
 
-  const acceptedCount = sealed.filter(r => r.status === 'accepted').length;
-  const underReviewCount = sealed.filter(r => r.status === 'under_review' || r.status === 'pending_manual_review').length;
-  const rejectedCount = sealed.filter(r => r.status === 'rejected').length;
+  const acceptedCount = sealed.filter(r => r.status === 'accepted' || r.officer_verdict === 'accepted').length;
+  const underReviewCount = sealed.filter(r => (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && r.officer_verdict !== 'accepted' && r.officer_verdict !== 'rejected').length;
+  const rejectedCount = sealed.filter(r => {
+    const isAcc = r.status === 'accepted' || r.officer_verdict === 'accepted';
+    const isRev = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAcc && r.officer_verdict !== 'rejected';
+    return !isAcc && !isRev;
+  }).length;
 
   // Eligible reports for deletion: ONLY accepted or rejected (under_review is protected and CANNOT be deleted)
-  const eligibleReports = sealed.filter(r => r.status === 'accepted' || r.status === 'rejected');
+  const eligibleReports = sealed.filter(r => {
+    const isRev = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && r.officer_verdict !== 'accepted' && r.officer_verdict !== 'rejected';
+    return !isRev;
+  });
   const allEligibleSelected =
     eligibleReports.length > 0 && eligibleReports.every(r => selectedIds.includes(r.report_id));
 
   // Toggle selection for a card in selection mode
   const toggleSelect = (reportId: string, status: string) => {
-    const isDeletable = status === 'accepted' || status === 'rejected';
+    const isDeletable = status === 'accepted' || status === 'rejected' || (!status.includes('review') && !status.includes('disputed'));
     if (!isDeletable) {
       Alert.alert(
         isUrdu ? 'محفوظ رپورٹ' : 'Protected Record',
@@ -618,13 +654,13 @@ export function Vault() {
         {activeTab === 'sealed' ? (
           <View style={styles.list}>
             {sealed.map((r) => {
-              const isAccepted = r.status === 'accepted';
-              const isUnderReview = r.status === 'under_review' || r.status === 'pending_manual_review';
-              const isRejected = r.status === 'rejected' || (!isAccepted && !isUnderReview);
+              const isAccepted = r.status === 'accepted' || r.officer_verdict === 'accepted';
+              const isUnderReview = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAccepted && r.officer_verdict !== 'rejected';
+              const isRejected = !isAccepted && !isUnderReview;
               const isOfficerAccepted = isAccepted && r.officer_verdict === 'accepted';
               const isOfficerRejected = isRejected && r.officer_verdict === 'rejected';
               const frames = r.frame_uris || [];
-              const isDeletable = isAccepted || isRejected;
+              const isDeletable = !isUnderReview;
               const isSelected = selectedIds.includes(r.report_id);
 
               return (
