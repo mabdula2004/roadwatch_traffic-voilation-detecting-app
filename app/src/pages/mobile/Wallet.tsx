@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -46,6 +47,7 @@ import {
   PenaltyCitation,
   StoredCaseReport,
 } from '../../lib/report';
+import { supabase } from '../../lib/supabase';
 
 interface WalletProps {
   onSelectFine?: (fineId: string) => void;
@@ -75,34 +77,39 @@ function buildSynthesizedTransactions(
   storedTx: WalletTransaction[],
   reports: StoredCaseReport[],
   citations: PenaltyCitation[],
-  isUrdu: boolean
+  isUrdu: boolean,
+  notifications?: any[]
 ): WalletTransaction[] {
   const result: WalletTransaction[] = [...storedTx];
   const existingKeys = new Set(
     storedTx.map(t => `${t.type}_${t.reportId || ''}_${t.amount}`)
   );
 
-  // 1. Synthesize from local reports
+  // 1. Synthesize from reports
   for (const rep of reports) {
     const repId = rep.reportId || rep.clientCaptureId;
     if (!repId) continue;
 
-    // Accepted report -> Bounty Reward (+PKR 200)
-    if (rep.status === 'accepted') {
-      const key = `reward_${repId}_200`;
+    // Accepted report -> Officer Payout (+PKR 300) or Bounty Reward (+PKR 200)
+    if (rep.status === 'accepted' || rep.officerVerdict === 'accepted') {
+      const isOfficerConfirmed = rep.officerVerdict === 'accepted';
+      const amount = isOfficerConfirmed ? 300 : 200;
+      const key = `reward_${repId}_${amount}`;
       if (!existingKeys.has(key)) {
         existingKeys.add(key);
+        existingKeys.add(`reward_${repId}_200`);
+        existingKeys.add(`reward_${repId}_300`);
         result.push({
           id: `TX-REP-REW-${repId.slice(-6)}`,
           type: 'reward',
-          amount: 200,
-          title: isUrdu ? 'شہری انعامی رقم (تصدیق شدہ)' : 'Citizen Bounty Reward',
-          subtitle: rep.aiResult?.violationName
+          amount: amount,
+          title: isOfficerConfirmed
+            ? (isUrdu ? 'وارڈن تصدیق شدہ انعام و فیس ریفنڈ' : 'Warden Confirmed Bounty & Fee Refund')
+            : (isUrdu ? 'شہری انعامی رقم (تصدیق شدہ)' : 'Citizen Bounty Reward'),
+          subtitle: rep.officerNote || (rep.aiResult?.violationName
             ? (isUrdu ? `${rep.aiResult.violationName} پر تصدیق شدہ انعام` : `Verified ${rep.aiResult.violationName} prize`)
-            : (rep.claimedClass && rep.claimedClass !== 'auto_ai_detect'
-              ? (isUrdu ? `${rep.claimedClass} خلاف ورزی پر تصدیق شدہ انعام` : `Verified ${rep.claimedClass} violation`)
-              : (isUrdu ? 'ٹریفک خلاف ورزی کی تصدیق پر انعام' : 'Verified traffic violation bounty prize')),
-          timestamp: rep.uploadedAt || rep.capturedAt || new Date().toISOString(),
+            : (isUrdu ? 'ٹریفک خلاف ورزی کی تصدیق پر انعام' : 'Verified traffic violation bounty prize')),
+          timestamp: rep.officerVerdictAt || rep.uploadedAt || rep.capturedAt || new Date().toISOString(),
           reportId: repId,
           locationName: rep.locationName,
           reason: rep.aiResult?.reasoning,
@@ -167,6 +174,31 @@ function buildSynthesizedTransactions(
     }
   }
 
+  // 3. Synthesize from remote reward notifications directly
+  if (notifications && notifications.length > 0) {
+    for (const notif of notifications) {
+      if (notif.type === 'reward_payout') {
+        const notifId = notif.notification_id || notif.id;
+        const key = `reward_notif_${notifId}`;
+        const notifTime = new Date(notif.sent_at).getTime();
+        const alreadyHasCloseReward = result.some(
+          t => t.type === 'reward' && Math.abs(new Date(t.timestamp).getTime() - notifTime) < 120000
+        );
+        if (!existingKeys.has(key) && !alreadyHasCloseReward) {
+          existingKeys.add(key);
+          result.push({
+            id: `TX-REW-${String(notifId).slice(-6)}`,
+            type: 'reward',
+            amount: 300,
+            title: isUrdu ? 'وارڈن تصدیق شدہ انعام و فیس ریفنڈ' : 'Warden Confirmed Bounty & Fee Refund',
+            subtitle: notif.message || (isUrdu ? 'ٹریفک خلاف ورزی پر تصدیق شدہ انعام' : 'Verified traffic violation bounty payout'),
+            timestamp: notif.sent_at || new Date().toISOString(),
+          });
+        }
+      }
+    }
+  }
+
   // Sort descending by timestamp
   return result.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 }
@@ -194,8 +226,32 @@ export function Wallet({ onSelectFine }: WalletProps) {
     }));
   };
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
+      const { data: auth } = await supabase.auth.getUser();
+      const currentUserId = auth?.user?.id;
+
+      // 1. Fetch remote reports and notifications to capture live officer verdicts & rewards
+      let remoteReports: any[] = [];
+      let remoteNotifs: any[] = [];
+      if (currentUserId) {
+        const [repRes, notifRes] = await Promise.all([
+          supabase
+            .from('reports')
+            .select('report_id,client_capture_id,claimed_class,captured_at,uploaded_at,status,location_name,officer_verdict,officer_note,officer_verdict_at')
+            .eq('reporter_id', currentUserId),
+          supabase
+            .from('notifications')
+            .select('*')
+            .eq('recipient_id', currentUserId)
+            .eq('type', 'reward_payout'),
+        ]);
+        if (repRes.data) remoteReports = repRes.data;
+        if (notifRes.data) remoteNotifs = notifRes.data;
+      }
+
       const [walletState, penaltyList, storedTxList, localRepList] = await Promise.all([
         getWalletBalance(),
         getPenaltyCitations(),
@@ -203,9 +259,39 @@ export function Wallet({ onSelectFine }: WalletProps) {
         getLocalReports(),
       ]);
 
-      // Enrich citations with location and reasoning from local reports if missing
+      // Merge local and remote reports so officer payouts appear immediately
+      const mergedReports = [...localRepList];
+      for (const r of remoteReports) {
+        const existing = mergedReports.find(
+          l => l.reportId === r.report_id || (r.client_capture_id && (l.clientCaptureId === r.client_capture_id || l.reportId === r.client_capture_id))
+        );
+        if (existing) {
+          if (r.officer_verdict) existing.officerVerdict = r.officer_verdict;
+          if (r.officer_note) existing.officerNote = r.officer_note;
+          if (r.status) existing.status = r.status;
+          if (r.officer_verdict_at) existing.officerVerdictAt = r.officer_verdict_at;
+        } else {
+          mergedReports.push({
+            reportId: r.report_id,
+            clientCaptureId: r.client_capture_id,
+            claimedClass: r.claimed_class,
+            capturedAt: r.captured_at,
+            uploadedAt: r.uploaded_at,
+            status: r.status,
+            locationName: r.location_name,
+            officerVerdict: r.officer_verdict,
+            officerNote: r.officer_note,
+            officerVerdictAt: r.officer_verdict_at,
+            latitude: 0,
+            longitude: 0,
+            accuracy: null,
+          });
+        }
+      }
+
+      // Enrich citations with location and reasoning from reports if missing
       const enrichedCitations = penaltyList.map(cit => {
-        const match = localRepList.find(r => r.reportId === cit.reportId || r.clientCaptureId === cit.reportId);
+        const match = mergedReports.find(r => r.reportId === cit.reportId || r.clientCaptureId === cit.reportId);
         return {
           ...cit,
           locationName: cit.locationName || match?.locationName,
@@ -216,7 +302,7 @@ export function Wallet({ onSelectFine }: WalletProps) {
         };
       });
 
-      const synthesized = buildSynthesizedTransactions(storedTxList, localRepList, enrichedCitations, isUrdu);
+      const synthesized = buildSynthesizedTransactions(storedTxList, mergedReports, enrichedCitations, isUrdu, remoteNotifs);
 
       setWallet(walletState);
       setCitations(enrichedCitations);
@@ -224,14 +310,43 @@ export function Wallet({ onSelectFine }: WalletProps) {
       setLoadError('');
     } catch (e) {
       console.warn('Error loading wallet data:', e);
-      setWallet({ balance: 500, pending_clearance: 0, epay_linked: true });
     } finally {
       setIsLoading(false);
     }
   }, [isUrdu]);
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await loadData();
+    setIsRefreshing(false);
+  };
+
   useEffect(() => {
     void loadData();
+
+    // 1. Supabase Realtime Channel — live update wallet balance when officer approves payout
+    const channel = supabase
+      .channel('wallet_realtime_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reward_wallets' }, () => {
+        void loadData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => {
+        void loadData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+        void loadData();
+      })
+      .subscribe();
+
+    // 2. High-reliability polling fallback every 5 seconds while user is on Wallet screen
+    const pollInterval = setInterval(() => {
+      void loadData();
+    }, 5000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
   }, [loadData]);
 
   const handleTopUp = async (amount: number) => {
@@ -302,7 +417,18 @@ export function Wallet({ onSelectFine }: WalletProps) {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.telemetry}
+            colors={[colors.telemetry]}
+          />
+        }
+      >
         {/* Title & Subtitle */}
         <Text style={[styles.title, { color: colors.ink }]}>{t('citizenWallet')}</Text>
         <Text style={[styles.subtitle, { color: colors.muted }]}>

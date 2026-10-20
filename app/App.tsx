@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
 import type { CapturedClip } from './src/lib/report';
@@ -33,6 +33,40 @@ function MainApp() {
 
   useEffect(() => {
     let mounted = true;
+    async function checkPendingRewardAlerts(uid?: string) {
+      try {
+        const userId = uid || (await supabase.auth.getUser()).data.user?.id;
+        if (!userId) return;
+
+        const seenRaw = await AsyncStorage.getItem(`@roadwatch_seen_notif_${userId}`);
+        const seenIds: string[] = seenRaw ? JSON.parse(seenRaw) : [];
+
+        const { data: unreadNotifs } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('recipient_id', userId)
+          .eq('type', 'reward_payout')
+          .order('sent_at', { ascending: false })
+          .limit(5);
+
+        if (unreadNotifs && unreadNotifs.length > 0) {
+          const newest = unreadNotifs.find((n: any) => !seenIds.includes(n.notification_id));
+          if (newest) {
+            seenIds.push(newest.notification_id);
+            await AsyncStorage.setItem(`@roadwatch_seen_notif_${userId}`, JSON.stringify(seenIds));
+            Alert.alert(
+              '🎉 Reward Bounty Credited!',
+              newest.message,
+              [
+                { text: 'View Wallet', onPress: () => setActiveScreen('wallet') },
+                { text: 'OK' },
+              ]
+            );
+          }
+        }
+      } catch {}
+    }
+
     async function checkRegistration() {
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) { if (mounted) { setIsOnboarded(false); setReady(true); } return; }
@@ -42,14 +76,54 @@ function MainApp() {
         setIsOnboarded(!error && !!data?.registration_completed_at && data.account_state === 'active');
         setReady(true);
       }
+      void checkPendingRewardAlerts(auth.user.id);
     }
     void checkRegistration().catch(() => { if (mounted) setReady(true); });
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
         if (mounted) { setIsOnboarded(false); setClip(null); setLatestOutcome(null); setActiveScreen('capture'); }
-      } else setTimeout(() => { void checkRegistration().catch(() => {}); }, 0);
+      } else {
+        setTimeout(() => {
+          void checkRegistration().catch(() => {});
+          void checkPendingRewardAlerts().catch(() => {});
+        }, 0);
+      }
     });
-    return () => { mounted = false; data.subscription.unsubscribe(); };
+
+    // Real-time in-app notification popup when officer confirms report or credits reward
+    const notifChannel = supabase
+      .channel('app_reward_notifications')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications' },
+        (payload) => {
+          const newNotif = payload.new as any;
+          if (newNotif && newNotif.message) {
+            if (newNotif.notification_id && newNotif.recipient_id) {
+              AsyncStorage.getItem(`@roadwatch_seen_notif_${newNotif.recipient_id}`).then((seenRaw) => {
+                const seenIds: string[] = seenRaw ? JSON.parse(seenRaw) : [];
+                seenIds.push(newNotif.notification_id);
+                AsyncStorage.setItem(`@roadwatch_seen_notif_${newNotif.recipient_id}`, JSON.stringify(seenIds)).catch(() => {});
+              }).catch(() => {});
+            }
+            Alert.alert(
+              '🎉 Reward Bounty Credited!',
+              newNotif.message,
+              [
+                { text: 'View Wallet', onPress: () => setActiveScreen('wallet') },
+                { text: 'OK' },
+              ]
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+      supabase.removeChannel(notifChannel);
+    };
   }, []);
 
   if (!ready) return <View style={[styles.loading, { backgroundColor: colors.canvas }]}><ActivityIndicator color={colors.telemetry} /></View>;

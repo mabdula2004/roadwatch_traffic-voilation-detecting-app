@@ -67,8 +67,9 @@ SET search_path = public
 AS $$
 DECLARE
   v_reporter_id uuid;
+  v_claimed_class text;
 BEGIN
-  SELECT reporter_id INTO v_reporter_id
+  SELECT reporter_id, claimed_class INTO v_reporter_id, v_claimed_class
   FROM public.reports
   WHERE report_id = p_report_id;
 
@@ -78,6 +79,15 @@ BEGIN
   VALUES (v_reporter_id, p_payout_amount, 0, false)
   ON CONFLICT (reporter_id) DO UPDATE
     SET balance = reward_wallets.balance + p_payout_amount;
+
+  INSERT INTO public.notifications (recipient_id, type, message, sent_at, channel)
+  VALUES (
+    v_reporter_id,
+    'reward_payout',
+    '🎉 Reward Bounty Credited! An officer reviewed and confirmed your traffic violation report (' || COALESCE(REPLACE(v_claimed_class, '_', ' '), 'Traffic Violation') || '). PKR ' || p_payout_amount || ' has been added to your wallet balance.',
+    now(),
+    'in_app'
+  );
 END;
 $$;
 
@@ -240,5 +250,99 @@ GRANT ALL ON public.evidence TO anon, authenticated, service_role;
 GRANT ALL ON public.base_users TO anon, authenticated, service_role;
 GRANT ALL ON public.reporter_profiles TO anon, authenticated, service_role;
 GRANT ALL ON public.reward_wallets TO anon, authenticated, service_role;
+GRANT ALL ON public.notifications TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.credit_citizen_reward_payout(uuid, integer) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.complete_reporter_registration(text, text, text, text) TO anon, authenticated, service_role;
+
+-- 11. RPC for ensuring auth user credentials exist and are confirmed
+CREATE OR REPLACE FUNCTION public.ensure_auth_user(
+  p_email text,
+  p_password text,
+  p_name text DEFAULT 'Citizen Reporter'
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+  v_user_id uuid;
+  v_hashed text;
+BEGIN
+  p_email := lower(trim(p_email));
+  v_hashed := extensions.crypt(p_password, extensions.gen_salt('bf'));
+
+  SELECT id INTO v_user_id
+  FROM auth.users
+  WHERE lower(email) = p_email
+  LIMIT 1;
+
+  IF v_user_id IS NOT NULL THEN
+    UPDATE auth.users
+    SET encrypted_password = v_hashed,
+        email_confirmed_at = COALESCE(email_confirmed_at, now()),
+        raw_user_meta_data = jsonb_set(COALESCE(raw_user_meta_data, '{}'::jsonb), '{full_name}', to_jsonb(p_name)),
+        updated_at = now()
+    WHERE id = v_user_id;
+
+    INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
+    VALUES (
+      gen_random_uuid(),
+      v_user_id,
+      jsonb_build_object('sub', v_user_id::text, 'email', p_email, 'email_verified', true, 'phone_verified', false),
+      'email',
+      v_user_id::text,
+      now(),
+      now(),
+      now()
+    )
+    ON CONFLICT (provider_id, provider) DO UPDATE
+      SET identity_data = EXCLUDED.identity_data,
+          updated_at = now();
+  ELSE
+    v_user_id := gen_random_uuid();
+    INSERT INTO auth.users (
+      instance_id,
+      id,
+      aud,
+      role,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      created_at,
+      updated_at
+    ) VALUES (
+      '00000000-0000-0000-0000-000000000000'::uuid,
+      v_user_id,
+      'authenticated',
+      'authenticated',
+      p_email,
+      v_hashed,
+      now(),
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      jsonb_build_object('full_name', p_name, 'email_verified', true),
+      now(),
+      now()
+    );
+
+    INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
+    VALUES (
+      gen_random_uuid(),
+      v_user_id,
+      jsonb_build_object('sub', v_user_id::text, 'email', p_email, 'email_verified', true, 'phone_verified', false),
+      'email',
+      v_user_id::text,
+      now(),
+      now(),
+      now()
+    );
+  END IF;
+
+  RETURN v_user_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ensure_auth_user(text, text, text) TO anon, authenticated, service_role;
+

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -18,6 +18,7 @@ import {
 import { Colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { supabase } from '../../lib/supabase';
 
 export interface AppNotification {
   id: string;
@@ -27,8 +28,6 @@ export interface AppNotification {
   type: 'alert' | 'success' | 'info';
   unread?: boolean;
 }
-
-const defaultNotifications: AppNotification[] = [];
 
 interface NotificationSheetProps {
   open: boolean;
@@ -41,6 +40,39 @@ export function NotificationSheet({
 }: NotificationSheetProps) {
   const { colors } = useTheme();
   const { t, isUrdu } = useLanguage();
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  useEffect(() => {
+    if (open) {
+      (async () => {
+        try {
+          const { data: auth } = await supabase.auth.getUser();
+          if (!auth?.user?.id) return;
+          const { data } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('recipient_id', auth.user.id)
+            .order('sent_at', { ascending: false })
+            .limit(20);
+
+          if (data && data.length > 0) {
+            setNotifications(
+              data.map((n) => ({
+                id: n.notification_id || Math.random().toString(),
+                title: n.type === 'reward_payout'
+                  ? (isUrdu ? 'انعامی رقم والیٹ میں شامل' : 'Reward Bounty Credited')
+                  : (isUrdu ? 'ٹریفک الرٹ' : 'Traffic Alert'),
+                message: n.message || '',
+                time: new Date(n.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                type: n.type === 'reward_payout' ? 'success' : 'info',
+                unread: true,
+              }))
+            );
+          }
+        } catch {}
+      })();
+    }
+  }, [open, isUrdu]);
 
   return (
     <Modal
@@ -60,7 +92,9 @@ export function NotificationSheet({
               <Bell size={18} color={colors.telemetry} />
               <Text style={[styles.title, { color: colors.ink }]}>{t('notificationsAlerts')}</Text>
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>{isUrdu ? '0 نئی' : '0 new'}</Text>
+                <Text style={styles.badgeText}>
+                  {notifications.length} {isUrdu ? 'نئی' : 'new'}
+                </Text>
               </View>
             </View>
             <TouchableOpacity
@@ -78,8 +112,10 @@ export function NotificationSheet({
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {defaultNotifications.length === 0 && <Text style={{ color: colors.muted, padding: 20 }}>{t('noNotifications')}</Text>}
-            {defaultNotifications.map((n) => {
+            {notifications.length === 0 && (
+              <Text style={{ color: colors.muted, padding: 20 }}>{t('noNotifications')}</Text>
+            )}
+            {notifications.map((n: AppNotification) => {
               const isAlert = n.type === 'alert';
               const isSuccess = n.type === 'success';
 
