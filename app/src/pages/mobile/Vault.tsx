@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -26,6 +26,8 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Maximize2,
   MapPin,
   Clock,
@@ -101,10 +103,15 @@ type ReportRow = {
   is_citizen_edited?: boolean;
 };
 
+export type VaultCategory = 'all' | 'accepted' | 'under_review' | 'rejected';
+const INITIAL_DISPLAY_COUNT = 5;
+
 export function Vault() {
   const { colors } = useTheme();
   const { t, isUrdu } = useLanguage();
   const [activeTab, setActiveTab] = useState<'pending' | 'sealed'>('sealed');
+  const [categoryFilter, setCategoryFilter] = useState<VaultCategory>('all');
+  const [showAllReports, setShowAllReports] = useState<boolean>(false);
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loadError, setLoadError] = useState('');
 
@@ -392,8 +399,29 @@ export function Vault() {
     return !isAcc && !isRev;
   }).length;
 
+  // Filtered reports for currently active category
+  const categoryReports = useMemo(() => {
+    if (categoryFilter === 'accepted') {
+      return sealed.filter(r => r.status === 'accepted' || r.officer_verdict === 'accepted');
+    }
+    if (categoryFilter === 'under_review') {
+      return sealed.filter(r => (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && r.officer_verdict !== 'accepted' && r.officer_verdict !== 'rejected');
+    }
+    if (categoryFilter === 'rejected') {
+      return sealed.filter(r => {
+        const isAcc = r.status === 'accepted' || r.officer_verdict === 'accepted';
+        const isRev = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAcc && r.officer_verdict !== 'rejected';
+        return !isAcc && !isRev;
+      });
+    }
+    return sealed;
+  }, [sealed, categoryFilter]);
+
+  // Display initial 5 reports or all if expanded
+  const displayedReports = showAllReports ? categoryReports : categoryReports.slice(0, INITIAL_DISPLAY_COUNT);
+
   // Eligible reports for deletion: ONLY accepted or rejected (under_review is protected and CANNOT be deleted)
-  const eligibleReports = sealed.filter(r => {
+  const eligibleReports = categoryReports.filter(r => {
     const isRev = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && r.officer_verdict !== 'accepted' && r.officer_verdict !== 'rejected';
     return !isRev;
   });
@@ -544,7 +572,20 @@ export function Vault() {
 
         {/* Dynamic Stats Grid: Accepted, Under Review, Rejected */}
         <View style={styles.statsRow}>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: 'rgba(16, 185, 129, 0.35)' }]}>
+          <TouchableOpacity
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: categoryFilter === 'accepted' ? 'rgba(16, 185, 129, 0.12)' : colors.surface,
+                borderColor: categoryFilter === 'accepted' ? colors.valid : 'rgba(16, 185, 129, 0.35)',
+              },
+            ]}
+            onPress={() => {
+              setCategoryFilter(prev => (prev === 'accepted' ? 'all' : 'accepted'));
+              setShowAllReports(false);
+            }}
+            activeOpacity={0.7}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <CheckCircle2 size={16} color={colors.valid} />
               <View style={[styles.statPill, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
@@ -553,9 +594,22 @@ export function Vault() {
             </View>
             <Text style={[styles.statValue, { color: colors.valid }]}>{acceptedCount}</Text>
             <Text style={[styles.statLabel, { color: colors.muted }]}>{t('approved')}</Text>
-          </View>
+          </TouchableOpacity>
 
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: 'rgba(245, 158, 11, 0.35)' }]}>
+          <TouchableOpacity
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: categoryFilter === 'under_review' ? 'rgba(245, 158, 11, 0.12)' : colors.surface,
+                borderColor: categoryFilter === 'under_review' ? colors.accent : 'rgba(245, 158, 11, 0.35)',
+              },
+            ]}
+            onPress={() => {
+              setCategoryFilter(prev => (prev === 'under_review' ? 'all' : 'under_review'));
+              setShowAllReports(false);
+            }}
+            activeOpacity={0.7}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <UserCheck size={16} color={colors.accent} />
               <View style={[styles.statPill, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
@@ -564,9 +618,22 @@ export function Vault() {
             </View>
             <Text style={[styles.statValue, { color: colors.accent }]}>{underReviewCount}</Text>
             <Text style={[styles.statLabel, { color: colors.muted }]}>{t('underHumanReview')}</Text>
-          </View>
+          </TouchableOpacity>
 
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: 'rgba(239, 68, 68, 0.35)' }]}>
+          <TouchableOpacity
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: categoryFilter === 'rejected' ? 'rgba(239, 68, 68, 0.12)' : colors.surface,
+                borderColor: categoryFilter === 'rejected' ? colors.signal : 'rgba(239, 68, 68, 0.35)',
+              },
+            ]}
+            onPress={() => {
+              setCategoryFilter(prev => (prev === 'rejected' ? 'all' : 'rejected'));
+              setShowAllReports(false);
+            }}
+            activeOpacity={0.7}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <AlertCircle size={16} color={colors.signal} />
               <View style={[styles.statPill, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
@@ -575,7 +642,7 @@ export function Vault() {
             </View>
             <Text style={[styles.statValue, { color: colors.signal }]}>{rejectedCount}</Text>
             <Text style={[styles.statLabel, { color: colors.muted }]}>{t('rejected')}</Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* Tab Selector */}
@@ -605,6 +672,107 @@ export function Vault() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Category Filter Pills (when activeTab is 'sealed') */}
+        {activeTab === 'sealed' && (
+          <View style={styles.categoryFilterRow}>
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'all' ? colors.telemetry : colors.edge,
+                  backgroundColor: categoryFilter === 'all' ? 'rgba(6, 182, 212, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('all');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'all' ? colors.telemetry : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'تمام ثبوت' : 'All Evidence'} ({sealed.length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'accepted' ? colors.valid : colors.edge,
+                  backgroundColor: categoryFilter === 'accepted' ? 'rgba(16, 185, 129, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('accepted');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'accepted' ? colors.valid : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'مصدقہ' : 'Approved'} ({acceptedCount})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'under_review' ? colors.accent : colors.edge,
+                  backgroundColor: categoryFilter === 'under_review' ? 'rgba(245, 158, 11, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('under_review');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'under_review' ? colors.accent : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'وارڈن جائزہ' : 'Under Review'} ({underReviewCount})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'rejected' ? colors.signal : colors.edge,
+                  backgroundColor: categoryFilter === 'rejected' ? 'rgba(239, 68, 68, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('rejected');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'rejected' ? colors.signal : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'مسترد' : 'Rejected'} ({rejectedCount})
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Multi-Selection Control Bar (When Selection Mode is Active) */}
         {isSelectionMode && activeTab === 'sealed' && (
@@ -652,7 +820,7 @@ export function Vault() {
         {/* List Content */}
         {activeTab === 'sealed' ? (
           <View style={styles.list}>
-            {sealed.map((r) => {
+            {displayedReports.map((r) => {
               const isAccepted = r.status === 'accepted' || r.officer_verdict === 'accepted';
               const isUnderReview = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAccepted && r.officer_verdict !== 'rejected';
               const isRejected = !isAccepted && !isUnderReview;
@@ -916,10 +1084,78 @@ export function Vault() {
                 </View>
               );
             })}
-            {!sealed.length && (
-              <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 20 }}>
-                {t('noSealedRecords')}
-              </Text>
+
+            {categoryReports.length > INITIAL_DISPLAY_COUNT && (
+              <TouchableOpacity
+                style={[styles.showMoreDropdownBtn, { backgroundColor: colors.surface, borderColor: colors.edge }]}
+                onPress={() => setShowAllReports(prev => !prev)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.showMoreDropdownText, { color: colors.telemetry }]}>
+                  {showAllReports
+                    ? (isUrdu ? `کم دکھائیں (اوپر والے ${INITIAL_DISPLAY_COUNT})` : `Show Less (Top ${INITIAL_DISPLAY_COUNT})`)
+                    : (isUrdu ? `مزید دکھائیں (+${categoryReports.length - INITIAL_DISPLAY_COUNT})` : `Show More (+${categoryReports.length - INITIAL_DISPLAY_COUNT} Reports)`)}
+                </Text>
+                {showAllReports ? (
+                  <ChevronUp size={16} color={colors.telemetry} />
+                ) : (
+                  <ChevronDown size={16} color={colors.telemetry} />
+                )}
+              </TouchableOpacity>
+            )}
+
+            {!categoryReports.length && (
+              <View style={[styles.categoryEmptyCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+                {categoryFilter === 'accepted' ? (
+                  <>
+                    <CheckCircle2 size={32} color={colors.valid} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {isUrdu ? 'کوئی مصدقہ رپورٹ موجود نہیں' : 'No Approved Reports'}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'ٹریفک وارڈن یا AI سے تصدیق شدہ رپورٹس (+200 روپے) یہاں نظر آئیں گی۔'
+                        : 'Reports verified by traffic wardens or AI (+PKR 200 reward) will appear in this category.'}
+                    </Text>
+                  </>
+                ) : categoryFilter === 'under_review' ? (
+                  <>
+                    <UserCheck size={32} color={colors.accent} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {isUrdu ? 'کوئی کیس زیرِ جائزہ نہیں' : 'No Reports Under Review'}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'جن ویڈیوز کا وارڈن دستی آڈٹ کر رہا ہے وہ یہاں ظاہر ہوں گی۔'
+                        : 'Citizen submissions currently pending official traffic warden audit appear here.'}
+                    </Text>
+                  </>
+                ) : categoryFilter === 'rejected' ? (
+                  <>
+                    <AlertCircle size={32} color={colors.signal} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {isUrdu ? 'کوئی مسترد رپورٹ نہیں' : 'Zero Rejected Reports'}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'شاباش! آپ کی کسی رپورٹ پر کوئی غلط رپورٹنگ جرمانہ یا مستردگی لاگو نہیں ہوئی۔'
+                        : 'Excellent! None of your reports have been rejected or penalized.'}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <FileText size={32} color={colors.muted} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {t('noSealedRecords')}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'جب آپ ویڈیوز سبمٹ کریں گے، وہ یہاں محفوظ ہوں گی۔'
+                        : 'When you record and submit violation clips, they will appear here.'}
+                    </Text>
+                  </>
+                )}
+              </View>
             )}
           </View>
         ) : (
@@ -2395,5 +2631,58 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.65)',
     fontSize: 11,
     textAlign: 'center',
+  },
+  categoryFilterRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 12,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  categoryFilterPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  categoryFilterText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  showMoreDropdownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 10,
+    gap: 8,
+  },
+  showMoreDropdownText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  categoryEmptyCard: {
+    padding: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 16,
+  },
+  categoryEmptyTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  categoryEmptySub: {
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 16,
   },
 });
