@@ -52,7 +52,9 @@ export function CaseListWorkspace({
                 <tr key={c.reportId} className="transition hover:bg-surface/80">
                   <td className="px-4 py-3 font-semibold text-muted">{c.caseId}</td>
                   <td className="px-4 py-3 font-display font-bold text-ink">
-                    {c.citizenPlate || c.plateNumber || 'Unreadable'}
+                    {c.citizenPlate || (c.rawPlate ? c.rawPlate : (
+                      <span className="text-2xs font-normal text-muted">Unidentified</span>
+                    ))}
                   </td>
                   <td className="px-4 py-3 font-medium text-accent">{c.violationName}</td>
                   <td className="px-4 py-3 text-muted">

@@ -314,7 +314,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         email: targetEmail,
         phone: formattedPhone || phone.trim() || '',
         cnic: cnic.trim() || `••••••••${cnicLast4}`,
-        plate: 'LEA-4471',
+        plate: '',
       };
       await AsyncStorage.setItem('@roadwatch_user_profile', JSON.stringify(profileToCache)).catch(() => {});
       await AsyncStorage.removeItem(ONBOARDING_TEMP_STORAGE_KEY).catch(() => {});
@@ -351,7 +351,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           const { error: rpErr } = await supabase.from('reporter_profiles').upsert({
             reporter_id: currentUserId,
             trust_score: 100,
-            vehicle_plate: 'LEA-4471',
+            vehicle_plate: null,
           }, { onConflict: 'reporter_id' });
           if (rpErr) console.warn('reporter_profiles save warning:', rpErr.message);
         } catch {}
@@ -371,7 +371,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             p_name: name.trim(),
             p_cnic: cnic.trim(),
             p_email: targetEmail,
-            p_vehicle_plate: 'LEA-4471',
+            p_vehicle_plate: null,
           });
         } catch {}
       }

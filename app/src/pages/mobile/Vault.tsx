@@ -1237,7 +1237,7 @@ export function Vault() {
                       <View style={styles.licensePlateContainer}>
                         <View style={styles.pakistanPlateBadge}>
                           <Text style={[styles.pakistanPlateText, { letterSpacing: 1.5 }]}>
-                            {(selectedReport.citizen_plate || selectedReport.plate_number || selectedReport.ai_result?.plateNumber || 'LEA-4471').toUpperCase()}
+                            {(selectedReport.citizen_plate || selectedReport.plate_number || selectedReport.ai_result?.plateNumber || (isUrdu ? 'غیر شناخت شدہ' : 'UNIDENTIFIED')).toUpperCase()}
                           </Text>
                         </View>
                       </View>

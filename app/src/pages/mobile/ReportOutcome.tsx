@@ -101,13 +101,15 @@ export function ReportOutcome({
     aiResult.citizenVehicleType || (aiResult.vehicleType !== 'Unknown' ? aiResult.vehicleType : 'Car')
   );
   const [citizenViolationType, setCitizenViolationType] = useState(
-    aiResult.citizenViolationType || aiResult.violationType || 'red_light_running'
+    aiResult.citizenViolationType || (aiResult.violationType && aiResult.violationType !== 'none' ? aiResult.violationType : '')
   );
   const [citizenNote, setCitizenNote] = useState(aiResult.citizenNote || '');
   const [hasCitizenEdited, setHasCitizenEdited] = useState(Boolean(aiResult.isCitizenEdited));
 
   const currentViolation = VIOLATION_TAXONOMY.find(v => v.code === citizenViolationType);
-  const currentViolationName = currentViolation?.name || aiResult.violationName || citizenViolationType;
+  const currentViolationName = currentViolation?.name
+    || (aiResult.violationName && aiResult.violationName !== 'No Infraction' ? aiResult.violationName : null)
+    || (citizenViolationType && citizenViolationType !== 'unspecified_violation' ? citizenViolationType : (isUrdu ? 'غیر متعین خلاف ورزی (وارڈن آڈٹ)' : 'Unspecified Infraction (Officer Audit)'));
 
   useEffect(() => {
     if (selectedZoomIndex !== null) {
@@ -217,15 +219,28 @@ export function ReportOutcome({
         setIsManualSubmitted(true);
         setShowConfirmModal(false);
 
+        const effectiveViolationCode = hasCitizenEdited
+          ? (citizenViolationType || 'unspecified_violation')
+          : (aiResult.violationType || 'unspecified_violation');
+
+        const effectiveViolationName = hasCitizenEdited
+          ? (currentViolation?.name || currentViolationName)
+          : (aiResult.violationName && aiResult.violationName !== 'No Infraction'
+              ? aiResult.violationName
+              : (isUrdu ? 'غیر متعین خلاف ورزی (وارڈن آڈٹ)' : 'Unspecified Infraction (Officer Audit)'));
+
         const citizenDetailsPayload = hasCitizenEdited ? {
           plateNumber: citizenPlate.trim(),
           vehicleMakeModel: citizenVehicleModel.trim(),
           vehicleColor: citizenVehicleColor.trim(),
           vehicleType: citizenVehicleType,
-          violationType: citizenViolationType,
-          violationName: currentViolationName,
+          violationType: effectiveViolationCode,
+          violationName: effectiveViolationName,
           citizenNote: citizenNote.trim(),
-        } : undefined;
+        } : {
+          violationType: effectiveViolationCode,
+          violationName: effectiveViolationName,
+        };
 
         // 1. Update report status if exists by effective ID and clientCaptureId
         const frameUris = await saveFramesToDisk(effectiveId, aiResult.framesBase64 || clip.framesBase64);
@@ -242,7 +257,7 @@ export function ReportOutcome({
           await saveLocalReport({
             reportId: effectiveId,
             clientCaptureId: clip.clientCaptureId,
-            claimedClass: citizenViolationType || 'auto_ai_detect',
+            claimedClass: effectiveViolationCode,
             capturedAt: clip.capturedAt,
             uploadedAt: new Date().toISOString(),
             latitude: clip.latitude,
@@ -254,13 +269,13 @@ export function ReportOutcome({
             penaltyPkr: 50,
             penaltyRefunded: true,
             frameUris,
-            citizenPlate: citizenPlate.trim() || undefined,
-            citizenVehicleMakeModel: citizenVehicleModel.trim() || undefined,
-            citizenVehicleColor: citizenVehicleColor.trim() || undefined,
-            citizenVehicleType: citizenVehicleType || undefined,
-            citizenViolationType: citizenViolationType || undefined,
-            citizenViolationName: currentViolationName || undefined,
-            citizenNote: citizenNote.trim() || undefined,
+            citizenPlate: (hasCitizenEdited && citizenPlate.trim()) ? citizenPlate.trim() : undefined,
+            citizenVehicleMakeModel: (hasCitizenEdited && citizenVehicleModel.trim()) ? citizenVehicleModel.trim() : undefined,
+            citizenVehicleColor: (hasCitizenEdited && citizenVehicleColor.trim()) ? citizenVehicleColor.trim() : undefined,
+            citizenVehicleType: hasCitizenEdited ? citizenVehicleType : undefined,
+            citizenViolationType: effectiveViolationCode,
+            citizenViolationName: effectiveViolationName,
+            citizenNote: (hasCitizenEdited && citizenNote.trim()) ? citizenNote.trim() : undefined,
             isCitizenEdited: hasCitizenEdited,
           });
         }
@@ -983,7 +998,7 @@ export function ReportOutcome({
                 <Text style={{ fontSize: 12, color: colors.ink }}>
                   <Text style={{ color: colors.muted }}>Vehicle: </Text>
                   <Text style={{ fontWeight: '600' }}>
-                    {[citizenVehicleColor, citizenVehicleModel].filter(Boolean).join(' ') || aiResult.vehicleMakeModel || citizenVehicleType}
+                    {(hasCitizenEdited ? [citizenVehicleColor, citizenVehicleModel].filter(Boolean).join(' ') : '') || aiResult.vehicleMakeModel || (isUrdu ? 'گاڑی کی تفصیل فراہم نہیں کی گئی' : 'Not Specified')}
                   </Text>
                 </Text>
                 <Text style={{ fontSize: 12, color: colors.ink }}>

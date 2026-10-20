@@ -17,6 +17,10 @@ const VIOLATION_MAP = {
   speeding_reckless: { name: 'Excessive Speed / Reckless Maneuvering', fine: 2500 },
   emergency_obstruction: { name: 'Obstructing Emergency Ambulance / Police', fine: 5000 },
   lane_violation: { name: 'Restricted Lane / Line Straddling', fine: 1000 },
+  unspecified_violation: { name: 'Unspecified Infraction (Pending Officer Review)', fine: 2000 },
+  pending_review: { name: 'Suspected Infraction (Officer Review Requested)', fine: 2000 },
+  auto_ai_detect: { name: 'Suspected Infraction (Pending Officer ID)', fine: 2000 },
+  traffic_violation: { name: 'General Traffic Infraction', fine: 2000 },
 };
 
 export function App() {
@@ -50,15 +54,16 @@ export function App() {
         .select('reporter_id, trust_score');
       const trustMap = new Map((profiles || []).map((p) => [p.reporter_id, p.trust_score ?? 100]));
 
-      // 3. Map into clean queue items
+      // 3. Map into clean queue items using real database data
       const mapped = (rawReports || []).map((r) => {
         const vInfo = VIOLATION_MAP[r.claimed_class] || {
-          name: r.claimed_class ? r.claimed_class.replace(/_/g, ' ').toUpperCase() : 'Traffic Violation',
+          name: (r.claimed_class && r.claimed_class !== 'auto_ai_detect' && r.claimed_class !== 'unspecified_violation')
+            ? r.claimed_class.replace(/_/g, ' ').toUpperCase()
+            : 'Unspecified Infraction (Pending Officer Review)',
           fine: 2000,
         };
 
         const isDisputed = r.status === 'pending_manual_review' || r.status === 'under_review';
-        const isPending = r.status === 'submitted' || r.status === 'pending_manual_review' || r.status === 'under_review';
         const dateObj = new Date(r.uploaded_at || r.captured_at || Date.now());
         const timeAgo = formatTimeAgo(dateObj);
 
@@ -67,7 +72,6 @@ export function App() {
         if (Array.isArray(r.frame_uris) && r.frame_uris.length > 0) {
           frameUris = r.frame_uris;
         } else if (r.client_capture_id) {
-          // Attempt storage URLs
           const { data: url1 } = supabase.storage
             .from('evidence_vault')
             .getPublicUrl(`${r.client_capture_id}/frame_1.jpg`);
@@ -86,29 +90,34 @@ export function App() {
           if (vData?.publicUrl) videoUrl = vData.publicUrl;
         }
 
+        // Real plate number resolution without fake fallbacks
+        const rawDetectedPlate = r.citizen_plate || r.vehicle_plate || r.plate_number;
+        const validPlate = rawDetectedPlate && rawDetectedPlate !== 'LEA-4471' ? rawDetectedPlate : null;
+
         return {
-          reportId: r.report_id || r.client_capture_id || `RW-${Math.floor(10000 + Math.random() * 90000)}`,
-          caseId: r.case_id || `CASE-${dateObj.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+          reportId: r.report_id || r.client_capture_id || `RW-${dateObj.getTime().toString().slice(-6)}`,
+          caseId: r.case_id || `CASE-${dateObj.getFullYear()}-${(r.report_id ? r.report_id.slice(-4) : dateObj.getTime().toString().slice(-4)).toUpperCase()}`,
           videoUrl,
-          plateNumber: r.plate_number || r.vehicle_plate || 'LEA-4471',
-          violationType: r.claimed_class || 'traffic_violation',
+          plateNumber: validPlate || 'Unidentified',
+          rawPlate: validPlate,
+          violationType: r.claimed_class || 'unspecified_violation',
           violationName: vInfo.name,
           reporterId: r.reporter_id,
           reporterName: userMap.get(r.reporter_id) || 'Verified Citizen',
           reporterTrust: trustMap.get(r.reporter_id) ?? 100,
           city: 'Lahore',
-          locationName: r.location_name || 'Mall Road Division, Lahore',
+          locationName: r.location_name || 'Location Not Specified',
           submittedAt: timeAgo,
           rawDate: dateObj.toLocaleDateString('en-PK', { hour: '2-digit', minute: '2-digit' }),
-          confidence: Math.floor(88 + Math.random() * 10),
-          clarityScore: Math.floor(85 + Math.random() * 12),
+          confidence: r.ai_confidence ? Math.round(Number(r.ai_confidence) * 100) : null,
+          clarityScore: r.ai_confidence ? Math.round(Number(r.ai_confidence) * 100) : null,
           status: r.status || 'pending_manual_review',
           isDisputed,
-          citizenNote: r.citizen_note || (isDisputed ? 'Citizen submitted dispute: vehicle crossed during amber transition.' : undefined),
-          citizenPlate: r.citizen_plate,
-          citizenVehicleModel: r.citizen_vehicle_model || 'Toyota Corolla GLi',
-          citizenVehicleColor: r.citizen_vehicle_color || 'White',
-          citizenVehicleType: r.citizen_vehicle_type || 'Car',
+          citizenNote: r.citizen_note || null,
+          citizenPlate: r.citizen_plate || null,
+          citizenVehicleModel: r.citizen_vehicle_model || null,
+          citizenVehicleColor: r.citizen_vehicle_color || null,
+          citizenVehicleType: r.citizen_vehicle_type || null,
           frameUris,
           geoLat: r.geo_lat,
           geoLong: r.geo_long,

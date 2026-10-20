@@ -41,7 +41,7 @@ export function PortalHeader({
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search plate (e.g. LEA-4471) or Case ID..."
+          placeholder="Search plate or Case ID..."
           className="w-full rounded-lg border border-edge bg-canvas/70 py-1.5 pl-9 pr-3 text-xs text-ink placeholder-muted transition-colors focus:border-telemetry focus:outline-none"
         />
         {searchQuery && (

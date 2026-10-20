@@ -98,7 +98,7 @@ CREATE OR REPLACE FUNCTION public.complete_reporter_registration(
   p_name text,
   p_cnic text,
   p_email text,
-  p_vehicle_plate text DEFAULT 'LEA-4471'
+  p_vehicle_plate text DEFAULT NULL
 )
 RETURNS void
 LANGUAGE plpgsql
@@ -147,7 +147,7 @@ BEGIN
         registration_completed_at = coalesce(base_users.registration_completed_at, now());
 
   INSERT INTO public.reporter_profiles (reporter_id, trust_score, vehicle_plate)
-  VALUES (new.id, 100, 'LEA-4471')
+  VALUES (new.id, 100, NULL)
   ON CONFLICT (reporter_id) DO NOTHING;
 
   INSERT INTO public.reward_wallets (reporter_id, balance, pending_clearance, epay_linked)
@@ -175,7 +175,7 @@ ON CONFLICT (user_id) DO UPDATE
       registration_completed_at = coalesce(base_users.registration_completed_at, now());
 
 INSERT INTO public.reporter_profiles (reporter_id, trust_score, vehicle_plate)
-SELECT u.user_id, 100, 'LEA-4471'
+SELECT u.user_id, 100, NULL
 FROM public.base_users u
 ON CONFLICT (reporter_id) DO NOTHING;
 

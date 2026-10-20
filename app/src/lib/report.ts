@@ -540,11 +540,15 @@ export async function uploadReport(
       } catch { }
 
       // Insert Report into public.reports as 'submitted' — awaiting officer verdict
+      const effectiveClaimedClass = (claimedClass && claimedClass !== 'auto_ai_detect')
+        ? claimedClass
+        : (aiResult?.violationType || 'unspecified_violation');
+
       const { data: insertedReport, error: insertError } = await supabase
         .from('reports')
         .insert({
           reporter_id: userId,
-          claimed_class: claimedClass === 'auto_ai_detect' ? (aiResult?.violationType || 'red_light_running') : claimedClass,
+          claimed_class: effectiveClaimedClass,
           captured_at: clip.capturedAt || new Date().toISOString(),
           uploaded_at: new Date().toISOString(),
           geo_lat: clip.latitude,
@@ -776,6 +780,7 @@ export async function updateReportStatus(
     if (extra?.citizenDetails?.vehicleColor) updatePayload.citizen_vehicle_color = extra.citizenDetails.vehicleColor;
     if (extra?.citizenDetails?.vehicleType) updatePayload.citizen_vehicle_type = extra.citizenDetails.vehicleType;
     if (extra?.citizenDetails?.citizenNote) updatePayload.citizen_note = extra.citizenDetails.citizenNote;
+    if (extra?.citizenDetails?.violationType) updatePayload.claimed_class = extra.citizenDetails.violationType;
 
     if (isReportUuid) {
       const { data } = await supabase.from('reports').update(updatePayload).eq('report_id', reportIdentifier).select('report_id');
@@ -807,7 +812,7 @@ export async function updateReportStatus(
         try {
           const res = await supabase.from('reports').insert({
             reporter_id: userId,
-            claimed_class: extra?.citizenDetails?.violationType || 'red_light_running',
+            claimed_class: extra?.citizenDetails?.violationType || 'unspecified_violation',
             status: 'submitted',
             client_capture_id: captureUuid,
             captured_at: new Date().toISOString(),

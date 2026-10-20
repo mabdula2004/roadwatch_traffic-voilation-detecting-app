@@ -364,15 +364,19 @@ export function PendingQueueWorkspace({
                   <span className="text-muted">License Plate</span>
                   <div className="flex items-center gap-2">
                     <span className="tabular font-display font-bold text-ink">
-                      {selectedCase.citizenPlate || selectedCase.plateNumber || 'Unreadable'}
+                      {selectedCase.citizenPlate || selectedCase.rawPlate || 'Unidentified'}
                     </span>
                     {selectedCase.citizenPlate ? (
                       <span className="rounded bg-accent/15 px-1.5 py-0.5 text-2xs font-bold text-accent">
-                        CITIZEN CORRECTED
+                        CITIZEN SPECIFIED
                       </span>
-                    ) : (
+                    ) : selectedCase.rawPlate ? (
                       <span className="rounded bg-valid/15 px-1.5 py-0.5 text-2xs font-bold text-valid">
                         AI DETECTED
+                      </span>
+                    ) : (
+                      <span className="rounded bg-muted/20 px-1.5 py-0.5 text-2xs font-bold text-muted">
+                        NOT DETECTED
                       </span>
                     )}
                   </div>
@@ -382,7 +386,7 @@ export function PendingQueueWorkspace({
                 <div className="flex items-center justify-between p-3">
                   <span className="text-muted">Target Vehicle</span>
                   <span className="font-semibold text-ink">
-                    {selectedCase.citizenVehicleColor || ''} {selectedCase.citizenVehicleModel || selectedCase.citizenVehicleType || 'Vehicle Identified'}
+                    {[selectedCase.citizenVehicleColor, selectedCase.citizenVehicleModel, selectedCase.citizenVehicleType].filter(Boolean).join(' ') || 'Vehicle Details Not Provided'}
                   </span>
                 </div>
 
@@ -398,7 +402,7 @@ export function PendingQueueWorkspace({
                 <div className="flex items-center justify-between p-3">
                   <span className="text-muted">AI Clarity Confidence</span>
                   <span className="tabular font-bold text-valid">
-                    {selectedCase.clarityScore || selectedCase.confidence}% Clear
+                    {selectedCase.clarityScore !== null ? `${selectedCase.clarityScore}% Clear` : 'Visual Inspection Required'}
                   </span>
                 </div>
               </div>
