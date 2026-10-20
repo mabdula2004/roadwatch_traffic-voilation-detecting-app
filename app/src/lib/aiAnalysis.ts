@@ -248,6 +248,32 @@ async function callOpenRouterVision(
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        // Upstream shared pool rate limit/congestion: wait 2.5s and retry once automatically
+        await new Promise(r => setTimeout(r, 2500));
+        const retryRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'HTTP-Referer': 'https://roadwatch.app',
+            'X-OpenRouter-Title': 'RoadWatch Traffic AI',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: AI_MODEL,
+            messages: [{ role: 'user', content }],
+            temperature: 0.1,
+            max_tokens: maxTokens,
+          }),
+        });
+        if (retryRes.ok) {
+          const data = await retryRes.json();
+          const rawContent = data.choices?.[0]?.message?.content || '';
+          const cleaned = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
+          const parsed = JSON.parse(cleaned);
+          return { ok: true, parsed };
+        }
+      }
       const errText = await response.text();
       return { ok: false, is402: response.status === 402, error: `HTTP ${response.status}: ${errText}` };
     }

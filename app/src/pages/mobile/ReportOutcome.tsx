@@ -381,12 +381,21 @@ export function ReportOutcome({
           )}
 
           {!isFined && !isManualSubmitted && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, padding: 8, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.25)' }}>
-              <AlertTriangle size={14} color="#ef4444" />
-              <Text style={{ fontSize: 11, fontWeight: '700', color: '#ef4444', flex: 1 }}>
-                {isUrdu ? 'رپورٹ مسترد! -50 روپے غلط اطلاع جرمانہ لاگو (مینوئل ریویو کروائیں یا والٹ چیک کریں)' : 'Report Rejected! -PKR 50 Penalty Charged for Invalid Report (Dispute below)'}
-              </Text>
-            </View>
+            aiResult.isRateLimited ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, padding: 8, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.25)' }}>
+                <Clock size={14} color="#f59e0b" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#f59e0b', flex: 1 }}>
+                  {isUrdu ? 'AI سروس عارضی طور پر مصروف ہے (429)۔ کوئی جرمانہ لاگو نہیں ہوا!' : 'AI service temporarily congested (429). Zero penalty charged — record preserved!'}
+                </Text>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, padding: 8, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.25)' }}>
+                <AlertTriangle size={14} color="#ef4444" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#ef4444', flex: 1 }}>
+                  {isUrdu ? 'رپورٹ مسترد! -50 روپے غلط اطلاع جرمانہ لاگو (مینوئل ریویو کروائیں یا والٹ چیک کریں)' : 'Report Rejected! -PKR 50 Penalty Charged for Invalid Report (Dispute below)'}
+                </Text>
+              </View>
+            )
           )}
         </View>
 

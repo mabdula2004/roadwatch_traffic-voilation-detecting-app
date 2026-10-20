@@ -382,33 +382,44 @@ export async function uploadEvidenceToStorage(
 
         // If already a file URI, fetch it directly as blob
         let frameBlob: Blob;
-        if (typeof b64 === 'string' && b64.startsWith('file://')) {
-          const r = await fetch(b64);
-          frameBlob = await r.blob();
-        } else {
-          // base64 string — convert via data URI fetch
-          const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
-          const dataUri = `data:image/jpeg;base64,${cleanB64}`;
-          const r = await fetch(dataUri);
-          frameBlob = await r.blob();
-        }
-
-        const { error: fErr } = await supabase.storage
-          .from('evidence_vault')
-          .upload(framePath, frameBlob, {
-            contentType: 'image/jpeg',
-            upsert: true,
-          });
-
-        if (!fErr) {
-          const { data: pubUrl } = supabase.storage
-            .from('evidence_vault')
-            .getPublicUrl(framePath);
-          if (pubUrl?.publicUrl) {
-            frameUrls.push(pubUrl.publicUrl);
+        let tempFileUri: string | null = null;
+        try {
+          if (typeof b64 === 'string' && b64.startsWith('file://')) {
+            const r = await fetch(b64);
+            frameBlob = await r.blob();
+          } else {
+            // Write base64 to temporary cache file first so native fetch uses file:// scheme
+            // (Android java.net.URL rejects data: protocol with MalformedURLException)
+            const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+            tempFileUri = `${FileSystem.cacheDirectory || FileSystem.documentDirectory}temp_vault_up_${Date.now()}_${i}.jpg`;
+            await FileSystem.writeAsStringAsync(tempFileUri, cleanB64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            const r = await fetch(tempFileUri);
+            frameBlob = await r.blob();
           }
-        } else {
-          console.warn('Frame upload notice:', fErr.message);
+
+          const { error: fErr } = await supabase.storage
+            .from('evidence_vault')
+            .upload(framePath, frameBlob, {
+              contentType: 'image/jpeg',
+              upsert: true,
+            });
+
+          if (!fErr) {
+            const { data: pubUrl } = supabase.storage
+              .from('evidence_vault')
+              .getPublicUrl(framePath);
+            if (pubUrl?.publicUrl) {
+              frameUrls.push(pubUrl.publicUrl);
+            }
+          } else {
+            console.warn('Frame upload notice:', fErr.message);
+          }
+        } finally {
+          if (tempFileUri) {
+            await FileSystem.deleteAsync(tempFileUri, { idempotent: true }).catch(() => {});
+          }
         }
       }
     }
@@ -462,7 +473,8 @@ export async function uploadReport(
   // All reports go to DB as 'submitted' so they reach the officer dashboard pending queue.
   // Officer makes the final verdict (accepted / rejected).
   const isAccepted = aiResult ? (aiResult.status === 'fined' && aiResult.violationDetected) : false;
-  const localDisplayStatus = isAccepted ? 'accepted' : 'rejected'; // shown locally in app
+  const isRateLimited = Boolean(aiResult?.isRateLimited);
+  const localDisplayStatus = isAccepted ? 'accepted' : isRateLimited ? 'under_review' : 'rejected'; // shown locally in app
   const dbInsertStatus = 'submitted'; // always submitted to officer queue
 
   let rewardPkr: number | undefined;
@@ -481,8 +493,12 @@ export async function uploadReport(
     } catch (e) {
       console.log('Reward deposit notice:', e);
     }
+  } else if (isRateLimited) {
+    // 2. Rate-limited / Congested AI upstream: NEVER penalize the user!
+    // No penalty fine is charged because the failure was on the AI service provider side.
+    penaltyPkr = undefined;
   } else {
-    // 2. Rejected: AI rejected violation claim -> penalty fine (-PKR 50) for invalid report
+    // 3. Rejected: AI rejected violation claim -> penalty fine (-PKR 50) for invalid report
     penaltyPkr = 50;
     try {
       await deductWalletBalance(50, {
