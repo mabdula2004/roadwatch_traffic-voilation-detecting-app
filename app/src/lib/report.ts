@@ -963,6 +963,52 @@ export async function updateReportCitizenDetails(
     });
 
     await AsyncStorage.setItem(vaultKey, JSON.stringify(updated));
+
+    // 2. Synchronize citizen manual details to Supabase reports table for Officer Dashboard
+    try {
+      const updatePayload: Record<string, any> = {};
+      if (details.plateNumber !== undefined && details.plateNumber.trim()) {
+        updatePayload.citizen_plate = details.plateNumber.trim();
+      }
+      if (details.vehicleMakeModel !== undefined && details.vehicleMakeModel.trim()) {
+        updatePayload.citizen_vehicle_model = details.vehicleMakeModel.trim();
+      }
+      if (details.vehicleColor !== undefined && details.vehicleColor.trim()) {
+        updatePayload.citizen_vehicle_color = details.vehicleColor.trim();
+      }
+      if (details.vehicleType !== undefined && details.vehicleType) {
+        updatePayload.citizen_vehicle_type = details.vehicleType;
+      }
+      if (details.citizenNote !== undefined && details.citizenNote.trim()) {
+        updatePayload.citizen_note = details.citizenNote.trim();
+      }
+      if (details.violationType && details.violationType !== 'auto_ai_detect' && details.violationType !== 'unspecified_violation') {
+        updatePayload.claimed_class = details.violationType;
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        const isReportUuid = UUID_REGEX.test(reportIdentifier);
+        let updatedRemote = false;
+
+        if (isReportUuid) {
+          const { data, error } = await supabase
+            .from('reports')
+            .update(updatePayload)
+            .eq('report_id', reportIdentifier)
+            .select('report_id');
+          if (!error && data && data.length > 0) updatedRemote = true;
+        }
+
+        if (!updatedRemote && clientCaptureId) {
+          await supabase
+            .from('reports')
+            .update(updatePayload)
+            .eq('client_capture_id', clientCaptureId);
+        }
+      }
+    } catch (syncErr) {
+      console.warn('Failed to sync citizen details to Supabase:', syncErr);
+    }
   } catch (err) {
     console.error('Failed to save citizen details to local vault:', err);
   }

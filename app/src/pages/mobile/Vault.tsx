@@ -247,6 +247,22 @@ export function Vault() {
               penaltyPkr: normStatus === 'rejected' ? 50 : undefined,
             });
           }
+
+          // If remote record is missing citizen-specified details that exist locally, sync them to Supabase
+          if (
+            (l.citizen_plate && !remoteMatch.citizen_plate) ||
+            (l.citizen_vehicle_model && !remoteMatch.citizen_vehicle_model) ||
+            (l.citizen_vehicle_color && !remoteMatch.citizen_vehicle_color) ||
+            (l.citizen_note && !remoteMatch.citizen_note)
+          ) {
+            void supabase.from('reports').update({
+              citizen_plate: l.citizen_plate || remoteMatch.citizen_plate,
+              citizen_vehicle_model: l.citizen_vehicle_model || remoteMatch.citizen_vehicle_model,
+              citizen_vehicle_color: l.citizen_vehicle_color || remoteMatch.citizen_vehicle_color,
+              citizen_vehicle_type: l.citizen_vehicle_type || remoteMatch.citizen_vehicle_type,
+              citizen_note: l.citizen_note || remoteMatch.citizen_note,
+            }).eq('report_id', remoteMatch.report_id);
+          }
         }
 
         combined.push(l);

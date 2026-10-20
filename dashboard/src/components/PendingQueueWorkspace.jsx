@@ -93,7 +93,7 @@ export function PendingQueueWorkspace({
               >
                 <div className="flex items-center justify-between">
                   <span className="tabular font-display text-sm font-bold text-ink">
-                    {c.plateNumber || 'PLATE UNKNOWN'}
+                    {c.citizenPlate || c.plateNumber || 'PLATE UNKNOWN'}
                   </span>
                   <span className="text-[10px] text-muted">{c.submittedAt}</span>
                 </div>
@@ -130,10 +130,14 @@ export function PendingQueueWorkspace({
           <div>
             <div className="flex items-center gap-3">
               <span className="tabular font-display text-2xl font-bold tracking-tight text-ink">
-                {selectedCase.plateNumber || 'NO PLATE DETECTED'}
+                {selectedCase.citizenPlate || selectedCase.plateNumber || 'NO PLATE DETECTED'}
               </span>
-              <Badge tone={selectedCase.isDisputed ? 'accent' : 'telemetry'}>
-                {selectedCase.isDisputed ? 'CITIZEN PKR 100 DISPUTE' : 'AUTOMATED AI FLAGGED'}
+              <Badge tone={selectedCase.isDisputed ? 'accent' : selectedCase.citizenPlate ? 'accent' : 'telemetry'}>
+                {selectedCase.isDisputed
+                  ? 'CITIZEN PKR 100 DISPUTE'
+                  : selectedCase.citizenPlate
+                  ? 'CITIZEN SPECIFIED EVIDENCE'
+                  : 'AUTOMATED AI FLAGGED'}
               </Badge>
               <span className="rounded border border-edge bg-surface px-2 py-0.5 text-2xs font-semibold text-muted">
                 {selectedCase.caseId}
@@ -362,21 +366,28 @@ export function PendingQueueWorkspace({
                 {/* License Plate */}
                 <div className="flex items-center justify-between p-3">
                   <span className="text-muted">License Plate</span>
-                  <div className="flex items-center gap-2">
-                    <span className="tabular font-display font-bold text-ink">
-                      {selectedCase.citizenPlate || selectedCase.rawPlate || 'Unidentified'}
-                    </span>
-                    {selectedCase.citizenPlate ? (
-                      <span className="rounded bg-accent/15 px-1.5 py-0.5 text-2xs font-bold text-accent">
-                        CITIZEN SPECIFIED
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="tabular font-display font-bold text-ink">
+                        {selectedCase.citizenPlate || selectedCase.rawPlate || 'Unidentified'}
                       </span>
-                    ) : selectedCase.rawPlate ? (
-                      <span className="rounded bg-valid/15 px-1.5 py-0.5 text-2xs font-bold text-valid">
-                        AI DETECTED
-                      </span>
-                    ) : (
-                      <span className="rounded bg-muted/20 px-1.5 py-0.5 text-2xs font-bold text-muted">
-                        NOT DETECTED
+                      {selectedCase.citizenPlate ? (
+                        <span className="rounded bg-accent/15 px-1.5 py-0.5 text-2xs font-bold text-accent">
+                          CITIZEN SPECIFIED
+                        </span>
+                      ) : selectedCase.rawPlate ? (
+                        <span className="rounded bg-valid/15 px-1.5 py-0.5 text-2xs font-bold text-valid">
+                          AI DETECTED
+                        </span>
+                      ) : (
+                        <span className="rounded bg-muted/20 px-1.5 py-0.5 text-2xs font-bold text-muted">
+                          NOT DETECTED
+                        </span>
+                      )}
+                    </div>
+                    {selectedCase.citizenPlate && selectedCase.aiPlate && selectedCase.citizenPlate !== selectedCase.aiPlate && (
+                      <span className="text-2xs text-muted">
+                        (AI read: {selectedCase.aiPlate})
                       </span>
                     )}
                   </div>
@@ -385,9 +396,16 @@ export function PendingQueueWorkspace({
                 {/* Target Vehicle */}
                 <div className="flex items-center justify-between p-3">
                   <span className="text-muted">Target Vehicle</span>
-                  <span className="font-semibold text-ink">
-                    {[selectedCase.citizenVehicleColor, selectedCase.citizenVehicleModel, selectedCase.citizenVehicleType].filter(Boolean).join(' ') || 'Vehicle Details Not Provided'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-ink">
+                      {[selectedCase.citizenVehicleColor, selectedCase.citizenVehicleModel, selectedCase.citizenVehicleType].filter(Boolean).join(' ') || 'Vehicle Details Not Provided'}
+                    </span>
+                    {(selectedCase.citizenVehicleColor || selectedCase.citizenVehicleModel || selectedCase.citizenVehicleType) && (
+                      <span className="rounded bg-accent/15 px-1.5 py-0.5 text-2xs font-bold text-accent">
+                        CITIZEN SPECIFIED
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Violation Classification */}
