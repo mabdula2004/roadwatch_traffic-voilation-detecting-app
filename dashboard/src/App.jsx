@@ -164,14 +164,13 @@ export function App() {
     );
   }, [cases, searchQuery]);
 
-  // Tab Slices
+  // Tab Slices: Pending Queue contains ONLY cases explicitly escalated for human/warden audit!
   const pendingCases = useMemo(
     () =>
       filteredCases.filter(
         (c) =>
           c.status === 'pending_manual_review' ||
-          c.status === 'under_review' ||
-          c.status === 'submitted'
+          c.status === 'under_review'
       ),
     [filteredCases]
   );
@@ -182,12 +181,22 @@ export function App() {
   );
 
   const approvedCases = useMemo(
-    () => filteredCases.filter((c) => c.status === 'accepted'),
+    () =>
+      filteredCases.filter(
+        (c) =>
+          c.status === 'accepted' ||
+          (c.status === 'submitted' && c.ai_verdict === 'accepted')
+      ),
     [filteredCases]
   );
 
   const rejectedCases = useMemo(
-    () => filteredCases.filter((c) => c.status === 'rejected'),
+    () =>
+      filteredCases.filter(
+        (c) =>
+          c.status === 'rejected' ||
+          (c.status === 'submitted' && c.ai_verdict === 'rejected')
+      ),
     [filteredCases]
   );
 

@@ -469,13 +469,12 @@ export async function uploadReport(
   const generatedId = aiResult?.caseId || `CASE-${Date.now().toString().slice(-6)}`;
   let finalReportId = generatedId;
 
-  // AI determines violation detection for local UX only.
-  // All reports go to DB as 'submitted' so they reach the officer dashboard pending queue.
-  // Officer makes the final verdict (accepted / rejected).
+  // When AI confirms a violation, it is auto-accepted directly.
+  // ONLY reports explicitly submitted for human review will have status 'pending_manual_review' / 'under_review'.
   const isAccepted = aiResult ? (aiResult.status === 'fined' && aiResult.violationDetected) : false;
   const isRateLimited = Boolean(aiResult?.isRateLimited);
-  const localDisplayStatus = isAccepted ? 'accepted' : isRateLimited ? 'under_review' : 'rejected'; // shown locally in app
-  const dbInsertStatus = 'submitted'; // always submitted to officer queue
+  const dbInsertStatus = isAccepted ? 'accepted' : isRateLimited ? 'under_review' : 'rejected';
+  const localDisplayStatus = dbInsertStatus;
 
   let rewardPkr: number | undefined;
   let penaltyPkr: number | undefined;
@@ -630,8 +629,10 @@ export async function uploadReport(
           geo_long: clip.longitude,
           location_accuracy_m: clip.accuracy || 10,
           client_capture_id: validCaptureUuid,
-          status: dbInsertStatus, // 'submitted' — lands in officer pending queue
+          status: dbInsertStatus,
           ai_verdict: isAccepted ? 'accepted' : 'rejected',
+          officer_verdict: isAccepted ? 'accepted' : null,
+          officer_note: isAccepted ? 'Automated AI Violation Verified' : null,
           ai_confidence: aiResult?.plateConfidence ?? (aiResult?.clarityScore ? Math.round(aiResult.clarityScore) : null),
           vehicle_plate: aiResult?.plateNumber || null,
           location_name: clip.locationName || null,
