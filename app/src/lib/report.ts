@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 import { AiEvidentiaryResult } from './aiAnalysis';
 import { rechargeWalletBalance, deductWalletBalance } from './wallet';
@@ -46,6 +47,9 @@ export interface StoredCaseReport {
   officerVerdictAt?: string;
   officerNote?: string;
   frameUris?: string[];
+  videoUri?: string;
+  videoUrl?: string;
+  confidenceScore?: number;
   // Citizen Manual Corrections / Overrides
   citizenPlate?: string;
   citizenVehicleMakeModel?: string;
@@ -439,7 +443,8 @@ export async function uploadEvidenceToStorage(
 export async function getReportFrames(
   reportId: string,
   clientCaptureId?: string,
-  fallbackUris?: string[]
+  fallbackUris?: string[],
+  videoUrl?: string | null
 ): Promise<string[]> {
   const uris: string[] = [];
   try {
@@ -449,6 +454,18 @@ export async function getReportFrames(
     if (clientCaptureId && clientCaptureId !== reportId) {
       safeIds.push(clientCaptureId.replace(/[^a-zA-Z0-9_-]/g, '_'));
     }
+    // Also extract safe ID prefix from any fallback local URIs if available
+    if (fallbackUris) {
+      for (const u of fallbackUris) {
+        if (typeof u === 'string' && u.includes('_frame_')) {
+          const m = u.match(/([a-zA-Z0-9_-]+)_frame_\d+\.jpg/);
+          if (m && m[1] && !safeIds.includes(m[1])) {
+            safeIds.push(m[1]);
+          }
+        }
+      }
+    }
+
     for (const sid of safeIds) {
       for (let i = 0; i < 3; i++) {
         const p = `${dir}${sid}_frame_${i}.jpg`;
@@ -479,6 +496,28 @@ export async function getReportFrames(
     }
     if (validLocal.length > 0) return validLocal;
     if (remoteUrls.length > 0) return remoteUrls;
+  }
+
+  // Fallback: On-demand thumbnail extraction from video URL if frames were missing
+  if (uris.length === 0 && videoUrl && typeof videoUrl === 'string' && (videoUrl.startsWith('http') || videoUrl.startsWith('file://'))) {
+    try {
+      const safeId = (reportId || clientCaptureId || 'frame').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const dir = `${FileSystem.documentDirectory}vault_frames/`;
+      const dirInfo = await FileSystem.getInfoAsync(dir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      }
+      const targetFile = `${dir}${safeId}_frame_0.jpg`;
+      const thumb = await VideoThumbnails.getThumbnailAsync(videoUrl, { time: 1000, quality: 0.6 });
+      if (thumb?.uri) {
+        await FileSystem.copyAsync({ from: thumb.uri, to: targetFile }).catch(() => {});
+        uris.push(targetFile);
+        await FileSystem.deleteAsync(thumb.uri, { idempotent: true }).catch(() => {});
+        return uris;
+      }
+    } catch (e) {
+      console.log('Video thumbnail extraction notice:', e);
+    }
   }
 
   return [];
@@ -618,6 +657,9 @@ export async function uploadReport(
     rewardPkr,
     penaltyPkr,
     frameUris: frameUris.length > 0 ? frameUris : remoteFrameUrls,
+    videoUri: clip.uri,
+    videoUrl: remoteVideoUrl || undefined,
+    confidenceScore: aiResult?.confidenceScore,
   };
   await saveLocalReport(localRecord);
 
@@ -664,7 +706,7 @@ export async function uploadReport(
           ai_verdict: isAccepted ? 'accepted' : 'rejected',
           officer_verdict: null, // AI detection only; human officer has not reviewed
           officer_note: null,
-          ai_confidence: aiResult?.plateConfidence ?? (aiResult?.clarityScore ? Math.round(aiResult.clarityScore) : null),
+          ai_confidence: aiResult?.confidenceScore ?? aiResult?.plateConfidence ?? (aiResult?.clarityScore ? Math.round(aiResult.clarityScore) : null),
           vehicle_plate: aiResult?.plateNumber || null,
           location_name: clip.locationName || null,
           video_url: remoteVideoUrl,
@@ -678,6 +720,10 @@ export async function uploadReport(
         localRecord.reportId = finalReportId;
         if (aiResult) {
           aiResult.caseId = finalReportId;
+        }
+        // Save frames under Supabase insertedReport UUID as well so lookups by Supabase ID succeed
+        if (framesToSave.length > 0) {
+          await saveFramesToDisk(finalReportId, framesToSave);
         }
         await saveLocalReport(localRecord);
 
@@ -1017,6 +1063,7 @@ export async function updateReportCitizenDetails(
       const updatePayload: Record<string, any> = {};
       if (details.plateNumber !== undefined && details.plateNumber.trim()) {
         updatePayload.citizen_plate = details.plateNumber.trim();
+        updatePayload.vehicle_plate = details.plateNumber.trim();
       }
       if (details.vehicleMakeModel !== undefined && details.vehicleMakeModel.trim()) {
         updatePayload.citizen_vehicle_model = details.vehicleMakeModel.trim();

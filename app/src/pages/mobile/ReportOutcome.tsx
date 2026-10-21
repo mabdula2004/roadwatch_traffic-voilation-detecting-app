@@ -111,6 +111,9 @@ export function ReportOutcome({
     || (aiResult.violationName && aiResult.violationName !== 'No Infraction' ? aiResult.violationName : null)
     || (citizenViolationType && citizenViolationType !== 'unspecified_violation' ? citizenViolationType : (isUrdu ? 'غیر متعین خلاف ورزی (وارڈن آڈٹ)' : 'Unspecified Infraction (Officer Audit)'));
 
+  const aiConfidence = aiResult.confidenceScore
+    ?? (aiResult.plateConfidence && aiResult.plateConfidence > 0 ? aiResult.plateConfidence : Math.round(aiResult.clarityScore || 70));
+
   useEffect(() => {
     if (selectedZoomIndex !== null) {
       setTimeout(() => {
@@ -624,6 +627,155 @@ export function ReportOutcome({
           </View>
         )}
 
+        {/* Prominent AI Confidence Assessment & Manual Edit Callout Card */}
+        <View
+          style={[
+            styles.confidenceCard,
+            {
+              backgroundColor: colors.surface,
+              borderColor: hasCitizenEdited
+                ? '#10b981'
+                : aiConfidence >= 75
+                ? 'rgba(16, 185, 129, 0.4)'
+                : aiConfidence >= 50
+                ? 'rgba(245, 158, 11, 0.4)'
+                : 'rgba(239, 68, 68, 0.4)',
+            },
+          ]}
+        >
+          <View style={styles.confidenceCardHeader}>
+            <View
+              style={[
+                styles.confidenceIconBox,
+                {
+                  backgroundColor: hasCitizenEdited
+                    ? 'rgba(16, 185, 129, 0.15)'
+                    : aiConfidence >= 75
+                    ? 'rgba(16, 185, 129, 0.15)'
+                    : aiConfidence >= 50
+                    ? 'rgba(245, 158, 11, 0.15)'
+                    : 'rgba(239, 68, 68, 0.15)',
+                },
+              ]}
+            >
+              {hasCitizenEdited ? (
+                <CheckCircle2 size={20} color="#10b981" />
+              ) : (
+                <Sparkles size={20} color={aiConfidence >= 75 ? '#10b981' : aiConfidence >= 50 ? '#f59e0b' : '#ef4444'} />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                <Text style={[styles.confidenceCardTitle, { color: colors.ink }]}>
+                  {hasCitizenEdited
+                    ? (isUrdu ? 'دستی تصدیق شدہ تفصیلات' : 'Citizen Verified Details')
+                    : (isUrdu ? `اے آئی اعتماد: ${aiConfidence}%` : `AI Detection Confidence: ${aiConfidence}%`)}
+                </Text>
+                <View
+                  style={[
+                    styles.confidenceLevelBadge,
+                    {
+                      backgroundColor: hasCitizenEdited
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : aiConfidence >= 75
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : aiConfidence >= 50
+                        ? 'rgba(245, 158, 11, 0.15)'
+                        : 'rgba(239, 68, 68, 0.15)',
+                      borderColor: hasCitizenEdited
+                        ? '#10b981'
+                        : aiConfidence >= 75
+                        ? '#10b981'
+                        : aiConfidence >= 50
+                        ? '#f59e0b'
+                        : '#ef4444',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.confidenceLevelText,
+                      {
+                        color: hasCitizenEdited
+                          ? '#10b981'
+                          : aiConfidence >= 75
+                          ? '#10b981'
+                          : aiConfidence >= 50
+                          ? '#f59e0b'
+                          : '#ef4444',
+                      },
+                    ]}
+                  >
+                    {hasCitizenEdited
+                      ? '100% (Manual Override)'
+                      : aiConfidence >= 75
+                      ? (isUrdu ? 'اعلیٰ یقین (High)' : 'High Certainty')
+                      : aiConfidence >= 50
+                      ? (isUrdu ? 'درمیانہ یقین (Medium)' : 'Moderate Certainty')
+                      : (isUrdu ? 'کم یقین (Low) - تصحیح درکار' : 'Low Certainty - Verify')}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={[styles.confidenceCardSub, { color: colors.muted }]}>
+                {hasCitizenEdited
+                  ? (isUrdu
+                      ? 'آپ کی فراہم کردہ گاڑی اور رجسٹریشن نمبر کو حتمی ثبوت تسلیم کر لیا گیا ہے۔'
+                      : 'Citizen-provided vehicle info and license plate override AI estimation and are saved to the citation.')
+                  : (isUrdu
+                      ? `اے آئی کا کہنا ہے: "میرے مطابق یہ ${aiConfidence}% اعتماد ہے۔ اگر گاڑی کا ماڈل، رنگ یا نمبر پلیٹ غلط ہے تو آپ نیچے سے دستی درست کر لیں تاکہ ریکارڈ ٹھیک رہے۔"`
+                      : `AI says: "My confidence is ${aiConfidence}%. If vehicle model, color, or plate details look incorrect, tap below to manually correct them."`)}
+              </Text>
+            </View>
+          </View>
+
+          {/* Confidence Progress Meter Bar */}
+          {!hasCitizenEdited && (
+            <View style={[styles.confidenceMeterTrack, { backgroundColor: colors.edge }]}>
+              <View
+                style={[
+                  styles.confidenceMeterFill,
+                  {
+                    width: `${Math.min(100, Math.max(12, aiConfidence))}%`,
+                    backgroundColor:
+                      aiConfidence >= 75 ? '#10b981' : aiConfidence >= 50 ? '#f59e0b' : '#ef4444',
+                  },
+                ]}
+              />
+            </View>
+          )}
+
+          {/* 1-Tap Manual Edit Action Button */}
+          <TouchableOpacity
+            style={[
+              styles.confidenceActionBtn,
+              {
+                backgroundColor: hasCitizenEdited
+                  ? 'rgba(16, 185, 129, 0.1)'
+                  : 'rgba(59, 130, 246, 0.1)',
+                borderColor: hasCitizenEdited
+                  ? '#10b981'
+                  : '#3b82f6',
+              },
+            ]}
+            activeOpacity={0.8}
+            onPress={() => setShowEditDetailsModal(true)}
+          >
+            <Edit3 size={15} color={hasCitizenEdited ? '#10b981' : '#3b82f6'} />
+            <Text
+              style={[
+                styles.confidenceActionBtnText,
+                { color: hasCitizenEdited ? '#10b981' : '#3b82f6' },
+              ]}
+            >
+              {hasCitizenEdited
+                ? (isUrdu ? 'تفصیلات میں مزید ترمیم کریں ✏️' : 'Re-edit Manual Details ✏️')
+                : (isUrdu ? 'گاڑی اور نمبر پلیٹ خود درست کریں (Manual Edit) ✏️' : 'Manually Review & Edit Vehicle Details ✏️')}
+            </Text>
+            <ChevronRight size={15} color={hasCitizenEdited ? '#10b981' : '#3b82f6'} />
+          </TouchableOpacity>
+        </View>
+
         {/* Vehicle & Target Telemetry Header with Manual Edit Action */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, marginBottom: 8 }}>
           <Text style={[styles.sectionHeading, { color: colors.muted, marginTop: 0, marginBottom: 0 }]}>
@@ -662,7 +814,7 @@ export function ReportOutcome({
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 }}>
                   <CheckCircle2 size={10} color="#10b981" />
                   <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '700' }}>
-                    {isUrdu ? 'شہری کی فراہم کردہ' : 'Citizen Specified'}
+                    {isUrdu ? 'شہری کی فراہم کردہ ✓' : 'Citizen Specified ✓'}
                   </Text>
                 </View>
                 {aiResult.plateNumber && aiResult.plateNumber !== citizenPlate && (
@@ -676,7 +828,7 @@ export function ReportOutcome({
                 <View style={[styles.platePill, { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10b981' }]}>
                   <Text style={[styles.plateNumberText, { color: '#10b981' }]}>{aiResult.plateNumber}</Text>
                 </View>
-                <Text style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>{aiResult.plateConfidence}% confidence</Text>
+                <Text style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>{aiResult.plateConfidence || aiConfidence}% confidence</Text>
               </View>
             ) : (
               <View style={{ alignItems: 'flex-end' }}>
@@ -710,19 +862,24 @@ export function ReportOutcome({
                   {[citizenVehicleColor, citizenVehicleModel].filter(Boolean).join(' ')}
                 </Text>
                 <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '600', marginTop: 1 }}>
-                  {citizenVehicleType} · {isUrdu ? 'شہری تفصیلات' : 'Citizen Specified'}
+                  {citizenVehicleType} · {isUrdu ? 'شہری تفصیلات ✓' : 'Citizen Specified ✓'}
                 </Text>
               </View>
             ) : (
-              <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '600' }]}>
-                {aiResult.vehicleColor && aiResult.vehicleColor !== 'Unknown'
-                  ? `${aiResult.vehicleColor} ${aiResult.vehicleMakeModel}`
-                  : aiResult.vehicleMakeModel !== 'Not Identified'
-                  ? aiResult.vehicleMakeModel
-                  : aiResult.vehicleType !== 'Unknown'
-                  ? aiResult.vehicleType
-                  : 'Traffic Vehicle Identified'}
-              </Text>
+              <View style={{ alignItems: 'flex-end', flexShrink: 1, maxWidth: '65%' }}>
+                <Text style={[styles.detailVal, { color: colors.ink, fontWeight: '600', textAlign: 'right' }]}>
+                  {aiResult.vehicleColor && aiResult.vehicleColor !== 'Unknown'
+                    ? `${aiResult.vehicleColor} ${aiResult.vehicleMakeModel}`
+                    : aiResult.vehicleMakeModel !== 'Not Identified'
+                    ? aiResult.vehicleMakeModel
+                    : aiResult.vehicleType !== 'Unknown'
+                    ? aiResult.vehicleType
+                    : 'Traffic Vehicle Identified'}
+                </Text>
+                <Text style={{ fontSize: 10, color: colors.muted, marginTop: 1 }}>
+                  AI Estimate ({aiConfidence}% confidence)
+                </Text>
+              </View>
             )}
           </View>
 
@@ -1640,6 +1797,74 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
+  },
+
+  // AI Confidence & Verification Card
+  confidenceCard: {
+    marginTop: 18,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    padding: 14,
+    marginBottom: 6,
+  },
+  confidenceCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  confidenceIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  confidenceCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  confidenceLevelBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  confidenceLevelText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  confidenceCardSub: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  confidenceMeterTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  confidenceMeterFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  confidenceActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  confidenceActionBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+    marginHorizontal: 8,
   },
 
   // Telemetry details

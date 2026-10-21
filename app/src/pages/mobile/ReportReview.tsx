@@ -394,6 +394,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           plateStatus: 'clear',
           plateNumber: null,
           plateConfidence: 0,
+          confidenceScore: 0,
           clarityScore: 100,
           rejectionReason: 'none',
           vehicleMakeModel: 'Pending Sync',

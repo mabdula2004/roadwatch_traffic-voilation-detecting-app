@@ -24,6 +24,7 @@ export interface AiEvidentiaryResult {
   plateStatus: PlateStatus;
   plateNumber: string | null;
   plateConfidence: number; // 0 - 100
+  confidenceScore: number; // 0 - 100 overall AI certainty in detection and vehicle
   clarityScore: number; // 0 - 100
   rejectionReason: RejectionReason;
   vehicleMakeModel: string;
@@ -207,6 +208,7 @@ export async function analyzeTrafficViolation(params: {
       plateStatus: 'blurred',
       plateNumber: null,
       plateConfidence: 0,
+      confidenceScore: 0,
       clarityScore: 0,
       rejectionReason: 'low_clarity',
       vehicleMakeModel: 'Not Captured',
@@ -394,8 +396,8 @@ async function callVisionAI(
   const focalIndex = frames.length > 1 ? 1 : 0;
   const primaryFrame = frames[focalIndex];
 
-  const stage1Prompt = `You are RoadWatch AI (Qwen3-VL 8B) traffic enforcement auditor.
-Review the provided central video keyframe extracted from a citizen's clip.${cropNote}
+  const stage1Prompt = `You are RoadWatch AI traffic enforcement vision auditor.
+Review the provided central video keyframe extracted from a citizen's clip in Pakistan.${cropNote}
 
 RECOGNIZED VIOLATIONS:
 ${COMPACT_VIOLATION_TAXONOMY}
@@ -406,12 +408,27 @@ PRIMARY EVIDENTIARY RULES:
    - "violation_detected": false
    - "rejection_reason": "no_violation"
    - "plate_number": null
+   - "confidence_score": 10
 
 2. ACTIONABLE VIOLATION:
    If a vehicle commits an actionable traffic violation:
    - "violation_detected": true
    - "violation_type": "<code_from_taxonomy>"
-   - "plate_number": exact sharp plate if 100% distinct, otherwise null with plate_status: "blurred". NEVER guess.
+
+3. STRICT VEHICLE & ATTRIBUTION RULES (Pakistani Traffic):
+   - You MUST identify the EXACT violating vehicle committing the infraction, NOT random background cars!
+   - "vehicle_type": Select the exact category: "Car" | "Motorcycle" | "Auto Rickshaw" | "Qingqi" | "Van / Bolan" | "Pickup" | "Truck" | "Bus" | "Tractor".
+   - "vehicle_color": State the primary body paint color clearly (e.g. "White", "Silver", "Black", "Grey", "Red", "Blue", "Yellow", "Green", "Maroon").
+   - "vehicle_make_model": Identify the specific make and model carefully:
+     - Common cars: Suzuki (Alto, Mehran, Cultus, Wagon R, Swift), Toyota (Corolla, Yaris, Fortuner, Prius), Honda (Civic, City), Kia (Sportage, Picanto), Hyundai (Tucson, Elantra), Changan (Alsvin), MG (HS, ZS).
+     - Common motorbikes: Honda CD 70, Honda CG 125, Yamaha YBR, Suzuki 110, Electric Scooter.
+     - If exact model is partly ambiguous, specify brand and body (e.g. "Suzuki Hatchback", "Toyota Sedan", "70cc Motorcycle") rather than wild guesses.
+   - "plate_number": Look closely at the vehicle's registration plate (Pakistani plates typically: 2-3 capital letters + 3-4 digits, e.g. "LEA-1234", "LED-3776", "ICT-512", "KHI-992"). If sharp and legible, provide it. If blurry or unreadable, set to null and "plate_status": "blurred".
+   - "plate_confidence": Genuine confidence in plate reading (0 to 100). If blurred/uncertain, state an honest low score (e.g. 20-50).
+   - "confidence_score": Overall confidence in your vehicle identification and violation detection (0 to 100):
+     - 80-100: Very high confidence (crisp footage, obvious vehicle & plate)
+     - 50-79: Moderate confidence (vehicle identified, but details somewhat blurry or challenging)
+     - Below 50: Low confidence (recommend manual verification by citizen/warden).
 
 Output ONLY valid JSON:
 {
@@ -421,6 +438,7 @@ Output ONLY valid JSON:
   "plate_status": "clear" | "blurred" | "missing",
   "plate_number": string or null,
   "plate_confidence": number,
+  "confidence_score": number,
   "clarity_score": number,
   "vehicle_make_model": string,
   "vehicle_color": string,
@@ -453,7 +471,7 @@ Output ONLY valid JSON:
 
     // --- SMART EARLY EXIT ---
     // If NO violation in this central frame (laptop screen, room, or lawful compliant traffic):
-    // STOP IMMEDIATELY! Do NOT send any more frames or waste any more tokens.
+    // Stop analysis but KEEP the extracted frames for Evidence Vault inspection or user dispute!
     if (!isVioSuspected) {
       return formatResult(
         caseId,
@@ -464,7 +482,7 @@ Output ONLY valid JSON:
         },
         params.claimedClass,
         locationName,
-        []
+        frames
       );
     }
 
@@ -489,18 +507,24 @@ Output ONLY valid JSON:
     let finalPlateNumber = s1.plate_number;
     let finalPlateStatus = s1.plate_status;
     let finalReasoning = s1.reasoning;
+    let finalMakeModel = s1.vehicle_make_model;
+    let finalColor = s1.vehicle_color;
+    let finalConfidence = s1.confidence_score;
 
     // If plate was blurred or not yet distinct, inspect exit tracking frame (80% duration) for clear plate:
     if ((s1.plate_status !== 'clear' || !s1.plate_number) && frames.length > 2) {
       const exitFrame = frames[2];
-      const platePrompt = `You are RoadWatch AI plate inspection specialist.
+      const platePrompt = `You are RoadWatch AI plate and vehicle identification specialist.
 Review this close-up exit frame for the violating vehicle (${s1.vehicle_color || ''} ${s1.vehicle_type || 'vehicle'}).
-Can you clearly read the vehicle license plate?
+Can you clearly read the vehicle license plate or identify more precise make, model, or color?
 Output ONLY JSON:
 {
   "plate_status": "clear" | "blurred" | "missing",
   "plate_number": string or null,
   "plate_confidence": number,
+  "confidence_score": number,
+  "vehicle_make_model": string or null,
+  "vehicle_color": string or null,
   "confirms_violation": boolean
 }`;
       const stage2Result = await callVisionAI(platePrompt, [exitFrame]);
@@ -509,6 +533,15 @@ Output ONLY JSON:
         if (stage2Result.parsed.plate_number && stage2Result.parsed.plate_status === 'clear') {
           finalPlateNumber = stage2Result.parsed.plate_number;
           finalPlateStatus = 'clear';
+        }
+        if (stage2Result.parsed.vehicle_make_model && (!finalMakeModel || finalMakeModel === 'Not Identified')) {
+          finalMakeModel = stage2Result.parsed.vehicle_make_model;
+        }
+        if (stage2Result.parsed.vehicle_color && (!finalColor || finalColor === 'Unknown')) {
+          finalColor = stage2Result.parsed.vehicle_color;
+        }
+        if (stage2Result.parsed.confidence_score !== undefined) {
+          finalConfidence = Math.max(Number(finalConfidence || 0), Number(stage2Result.parsed.confidence_score));
         }
         if (stage2Result.parsed.confirms_violation) {
           confirmedIndices.push(3);
@@ -522,6 +555,9 @@ Output ONLY JSON:
         ...s1,
         plate_number: finalPlateNumber,
         plate_status: finalPlateStatus,
+        vehicle_make_model: finalMakeModel,
+        vehicle_color: finalColor,
+        confidence_score: finalConfidence,
         confirmed_frame_indices: confirmedIndices,
         reasoning: finalReasoning,
       },
@@ -541,6 +577,7 @@ Output ONLY JSON:
     plateStatus: 'blurred',
     plateNumber: null,
     plateConfidence: 0,
+    confidenceScore: 0,
     clarityScore: 0,
     rejectionReason: 'none',
     vehicleMakeModel: 'Not Detected',
@@ -698,9 +735,18 @@ function formatResult(
   const detectedViolationCode = status === 'fined' ? violationType : null;
   const violationMeta = getViolationMeta(detectedViolationCode);
   const fineAmountPkr = status === 'fined' && detectedViolationCode ? (FINE_SCHEDULE[detectedViolationCode] || 2000) : 0;
-  const plateConfidence = status === 'fined' && detectedPlate
-    ? Math.max(85, Math.round(Number(parsed.plate_confidence ?? 0.95) * 100))
-    : 0;
+  
+  // Honest plate confidence (0 - 100) without artificial clamping
+  const plateConfidence = detectedPlate && parsed.plate_confidence !== undefined
+    ? Math.min(100, Math.max(10, Math.round(Number(parsed.plate_confidence) * (Number(parsed.plate_confidence) <= 1 ? 100 : 1))))
+    : (detectedPlate ? 75 : 0);
+
+  // Overall AI detection certainty score (0 - 100)
+  const rawConfidence = Number(parsed.confidence_score ?? parsed.confidence ?? (status === 'fined' ? 82 : 45));
+  let confidenceScore = Math.min(100, Math.max(15, Math.round(rawConfidence > 1 ? rawConfidence : rawConfidence * 100)));
+  if (status === 'fined' && plateStatus === 'blurred') {
+    confidenceScore = Math.min(confidenceScore, 65);
+  }
 
   // Frame sequence attribution: Determine the decisive violation frame (defaults to Frame 2)
   const violationFrameIndex = Number(parsed.violation_frame_index) >= 1 && Number(parsed.violation_frame_index) <= 3
@@ -708,11 +754,7 @@ function formatResult(
     : (status === 'fined' ? 2 : 1);
 
   // Proving evidentiary frame(s):
-  // Preserve and display ONLY the frames in which violation is confirmly detected!
-  // - 0 confirmed frames (or laptop / room / no violation) -> 0 frames!
-  // - 1 frame confirms violation -> 1 frame!
-  // - 2 frames confirm violation -> 2 frames!
-  // - 3 frames confirm violation -> 3 frames!
+  // Preserve and display ALL candidate keyframes so Vault preview and dossier never show empty/black placeholders!
   const safeFrames = framesBase64 || [];
   const decisiveFrames: string[] = [];
   const frameDescriptions: string[] = [];
@@ -730,7 +772,6 @@ function formatResult(
       }
     }
 
-    // Fallback if violation confirmed but model didn't specify indices: default to 1 focal frame (Frame 2 or Frame 1)
     if (confirmedIndices.length === 0 && safeFrames.length > 0) {
       confirmedIndices = [safeFrames.length > 1 ? 2 : 1];
     }
@@ -742,13 +783,26 @@ function formatResult(
       }
     }
 
-    if (Array.isArray(parsed.frame_descriptions) && parsed.frame_descriptions.length === decisiveFrames.length) {
+    // Always preserve remaining safeFrames so 3-frame preview strip on Vault card and dossier are fully populated!
+    for (const f of safeFrames) {
+      if (!decisiveFrames.includes(f)) {
+        decisiveFrames.push(f);
+      }
+    }
+
+    if (Array.isArray(parsed.frame_descriptions) && parsed.frame_descriptions.length >= decisiveFrames.length) {
       frameDescriptions.push(...parsed.frame_descriptions.map(String));
     } else {
       decisiveFrames.forEach((_, i) => {
-        frameDescriptions.push(`Frame ${i + 1}: ⚡ VIOLATION CONFIRMED - ${violationMeta?.name || 'Evidence Keyframe'}`);
+        frameDescriptions.push(`Frame ${i + 1}: ⚡ VIOLATION MOMENT - ${violationMeta?.name || 'Evidence Keyframe'}`);
       });
     }
+  } else {
+    // Keep all extracted frames for evidence vault inspection, human dispute, and warden review!
+    decisiveFrames.push(...safeFrames);
+    safeFrames.forEach((_, i) => {
+      frameDescriptions.push(`Frame ${i + 1}: Evidence Video Keyframe`);
+    });
   }
 
   return {
@@ -760,6 +814,7 @@ function formatResult(
     plateStatus: status === 'fined' ? 'clear' : plateStatus,
     plateNumber: status === 'fined' ? detectedPlate : null,
     plateConfidence,
+    confidenceScore,
     clarityScore,
     rejectionReason,
     vehicleMakeModel,

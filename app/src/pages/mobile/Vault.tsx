@@ -101,6 +101,8 @@ type ReportRow = {
   citizen_violation_name?: string;
   citizen_note?: string;
   is_citizen_edited?: boolean;
+  video_url?: string;
+  confidence_score?: number;
 };
 
 export type VaultCategory = 'all' | 'accepted' | 'under_review' | 'rejected';
@@ -201,7 +203,7 @@ export function Vault() {
 
       const formattedLocal: ReportRow[] = await Promise.all(
         filteredLocalList.map(async (item) => {
-          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris);
+          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris, item.videoUri || item.videoUrl);
           const normStatus = resolveCanonicalReportStatus({
             status: item.status,
             officerVerdict: item.officerVerdict,
@@ -226,6 +228,8 @@ export function Vault() {
             total_payout_pkr: item.totalPayoutPkr,
             officer_note: item.officerNote,
             frame_uris: frames.length > 0 ? frames : undefined,
+            video_url: item.videoUrl || item.videoUri,
+            confidence_score: item.confidenceScore || item.aiResult?.confidenceScore,
             ai_result: item.aiResult,
             vehicle_model: item.aiResult?.vehicleMakeModel,
             vehicle_color: item.aiResult?.vehicleColor,
@@ -286,6 +290,19 @@ export function Vault() {
           if (remoteMatch.officer_note) l.officer_note = remoteMatch.officer_note;
           if (remoteMatch.vehicle_plate && !l.plate_number) l.plate_number = remoteMatch.vehicle_plate;
           if (remoteMatch.location_name && !l.location_name) l.location_name = remoteMatch.location_name;
+          if (remoteMatch.video_url && !l.video_url) l.video_url = remoteMatch.video_url;
+
+          // Crucial: recover frames if local had no frames or lost them!
+          if ((!l.frame_uris || l.frame_uris.length === 0) && remoteMatch.frame_uris && remoteMatch.frame_uris.length > 0) {
+            l.frame_uris = remoteMatch.frame_uris;
+          }
+          if ((!l.frame_uris || l.frame_uris.length === 0) && remoteMatch.video_url) {
+            const recovered = await getReportFrames(l.report_id, l.client_capture_id, undefined, remoteMatch.video_url);
+            if (recovered.length > 0) {
+              l.frame_uris = recovered;
+            }
+          }
+
           l.status = normStatus;
           if (normStatus === 'accepted') {
             l.reward_pkr = 200;
@@ -304,6 +321,8 @@ export function Vault() {
               officerNote: remoteMatch.officer_note,
               rewardPkr: normStatus === 'accepted' ? 200 : undefined,
               penaltyPkr: normStatus === 'rejected' ? 50 : undefined,
+              frameUris: matchItem.frameUris || l.frame_uris,
+              videoUrl: matchItem.videoUrl || remoteMatch.video_url,
             });
           }
 
@@ -342,7 +361,7 @@ export function Vault() {
             ai_verdict: r.ai_verdict,
           });
 
-          const rFrames = await getReportFrames(r.report_id, r.client_capture_id, r.frame_uris);
+          const rFrames = await getReportFrames(r.report_id, r.client_capture_id, r.frame_uris, r.video_url);
 
           combined.push({
             report_id: r.report_id,
@@ -357,6 +376,8 @@ export function Vault() {
             plate_number: r.citizen_plate || r.vehicle_plate || undefined,
             officer_verdict: r.officer_verdict,
             officer_note: r.officer_note,
+            video_url: r.video_url,
+            confidence_score: r.ai_confidence ? Number(r.ai_confidence) : undefined,
             frame_uris: rFrames.length > 0 ? rFrames : (Array.isArray(r.frame_uris) && r.frame_uris.length > 0 ? r.frame_uris : undefined),
             client_capture_id: r.client_capture_id,
             citizen_plate: r.citizen_plate,
@@ -380,7 +401,7 @@ export function Vault() {
       );
       const mapped = await Promise.all(
         filtered.map(async (item) => {
-          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris);
+          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris, item.videoUri || item.videoUrl);
           return {
             report_id: item.reportId,
             claimed_class: item.claimedClass,
