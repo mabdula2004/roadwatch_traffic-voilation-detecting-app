@@ -662,8 +662,8 @@ export async function uploadReport(
           client_capture_id: validCaptureUuid,
           status: dbInsertStatus,
           ai_verdict: isAccepted ? 'accepted' : 'rejected',
-          officer_verdict: isAccepted ? 'accepted' : null,
-          officer_note: isAccepted ? 'Automated AI Violation Verified' : null,
+          officer_verdict: null, // AI detection only; human officer has not reviewed
+          officer_note: null,
           ai_confidence: aiResult?.plateConfidence ?? (aiResult?.clarityScore ? Math.round(aiResult.clarityScore) : null),
           vehicle_plate: aiResult?.plateNumber || null,
           location_name: clip.locationName || null,
@@ -1237,6 +1237,19 @@ export async function getConsolidatedReporterStats(userId?: string): Promise<{
         else underReview++;
       }
     }
+
+    // 3. Reconcile with citations so clearing video cards from the vault screen
+    // preserves the citizen's authentic lifetime penalty history
+    try {
+      const citations = await getPenaltyCitations();
+      for (const c of citations) {
+        const cKey = c.reportId || c.citationId;
+        if (cKey && !seen.has(cKey)) {
+          seen.add(cKey);
+          rejected++;
+        }
+      }
+    } catch {}
 
     const totalResolved = approved + rejected;
     let trustScore = 100;

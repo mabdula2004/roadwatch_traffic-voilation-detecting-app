@@ -878,8 +878,9 @@ export function Vault() {
               const isAccepted = r.status === 'accepted' || r.officer_verdict === 'accepted';
               const isUnderReview = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAccepted && r.officer_verdict !== 'rejected';
               const isRejected = !isAccepted && !isUnderReview;
-              const isOfficerAccepted = isAccepted && r.officer_verdict === 'accepted';
-              const isOfficerRejected = isRejected && r.officer_verdict === 'rejected';
+              const isHumanOfficer = Boolean(r.officer_verdict) && !r.officer_note?.includes('Automated AI');
+              const isOfficerAccepted = isAccepted && r.officer_verdict === 'accepted' && isHumanOfficer;
+              const isOfficerRejected = isRejected && r.officer_verdict === 'rejected' && isHumanOfficer;
               const frames = r.frame_uris || [];
               const isDeletable = !isUnderReview;
               const isSelected = selectedIds.includes(r.report_id);
@@ -1114,7 +1115,7 @@ export function Vault() {
 
                     {/* Status Explanation note */}
                     <Text style={[styles.explanationText, { color: colors.muted }]}>
-                      {r.officer_note
+                      {isHumanOfficer && r.officer_note
                         ? r.officer_note
                         : isUnderReview
                         ? (isUrdu ? 'ٹریفک وارڈن کے زیرِ جائزہ۔ افسر ویڈیو فریمز اور شواہد کی تصدیق کر رہا ہے (یہ رپورٹ محفوظ ہے)۔' : 'Under Traffic Warden audit. Certified officer is reviewing evidence (Protected from deletion).')

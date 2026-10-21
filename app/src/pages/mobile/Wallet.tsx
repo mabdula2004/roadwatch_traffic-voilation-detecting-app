@@ -54,7 +54,7 @@ interface WalletProps {
 }
 
 type TabType = 'history' | 'citations';
-type FilterType = 'all' | 'rewards' | 'deductions' | 'topups';
+type FilterType = 'all' | 'rewards' | 'penalties' | 'review_fees' | 'topups';
 
 function formatDateTime(isoString?: string): { date: string; time: string; full: string } {
   if (!isoString) return { date: 'N/A', time: '', full: 'N/A' };
@@ -289,23 +289,69 @@ export function Wallet({ onSelectFine }: WalletProps) {
         }
       }
 
-      // Enrich citations with location and reasoning from reports if missing
-      const enrichedCitations = penaltyList.map(cit => {
+      // Consolidate all penalty citations from saved citations, wallet transactions, and rejected reports
+      const citMap = new Map<string, PenaltyCitation>();
+
+      // 1. Existing stored citations
+      for (const cit of penaltyList) {
         const match = mergedReports.find(r => r.reportId === cit.reportId || r.clientCaptureId === cit.reportId);
-        return {
+        citMap.set(cit.reportId, {
           ...cit,
           locationName: cit.locationName || match?.locationName,
           latitude: cit.latitude ?? match?.latitude,
           longitude: cit.longitude ?? match?.longitude,
           reason: cit.reason || match?.aiResult?.reasoning || (isUrdu ? 'ویڈیو فوٹیج میں ٹریفک قوانین کی کوئی خلاف ورزی نہیں پائی گئی۔' : 'AI evaluated video footage and found no actionable violation.'),
           claimedClass: cit.claimedClass || match?.claimedClass,
-        };
-      });
+        });
+      }
 
-      const synthesized = buildSynthesizedTransactions(storedTxList, mergedReports, enrichedCitations, isUrdu, remoteNotifs);
+      // 2. Penalty transactions recorded in wallet
+      for (const tx of storedTxList) {
+        if (tx.type === 'penalty_fine') {
+          const repKey = tx.reportId || tx.id;
+          if (!citMap.has(repKey)) {
+            const match = mergedReports.find(r => r.reportId === repKey || r.clientCaptureId === repKey);
+            citMap.set(repKey, {
+              citationId: tx.id.replace('TX-DED-', 'CIT-').replace('TX-REP-PEN-', 'CIT-').replace('TX-CIT-', 'CIT-'),
+              reportId: repKey,
+              amountPkr: Math.abs(tx.amount) || 50,
+              reason: tx.reason || tx.subtitle || match?.aiResult?.reasoning || (isUrdu ? 'غلط رپورٹنگ پر عائد کردہ چالان' : 'Automated fine for invalid report footage'),
+              issuedAt: tx.timestamp,
+              status: 'paid_from_wallet',
+              locationName: tx.locationName || match?.locationName,
+              claimedClass: match?.claimedClass || 'invalid_submission',
+            });
+          }
+        }
+      }
+
+      // 3. Rejected reports
+      for (const rep of mergedReports) {
+        if (rep.status === 'rejected') {
+          const repKey = rep.reportId || rep.clientCaptureId;
+          if (repKey && !citMap.has(repKey)) {
+            citMap.set(repKey, {
+              citationId: `CIT-${repKey.slice(-6)}`,
+              reportId: repKey,
+              amountPkr: rep.penaltyPkr || 50,
+              reason: rep.aiResult?.reasoning || (isUrdu ? 'ویڈیو فوٹیج میں ٹریفک قوانین کی کوئی خلاف ورزی نہیں پائی گئی۔' : 'AI evaluated video footage and found no actionable violation.'),
+              issuedAt: rep.uploadedAt || rep.capturedAt || new Date().toISOString(),
+              status: 'paid_from_wallet',
+              locationName: rep.locationName,
+              claimedClass: rep.claimedClass || 'invalid_submission',
+            });
+          }
+        }
+      }
+
+      const allCitations = Array.from(citMap.values()).sort(
+        (a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime()
+      );
+
+      const synthesized = buildSynthesizedTransactions(storedTxList, mergedReports, allCitations, isUrdu, remoteNotifs);
 
       setWallet(walletState);
-      setCitations(enrichedCitations);
+      setCitations(allCitations);
       setTransactions(synthesized);
       setLoadError('');
     } catch (e) {
@@ -380,14 +426,22 @@ export function Wallet({ onSelectFine }: WalletProps) {
     if (filter === 'rewards') {
       return transactions.filter(t => t.type === 'reward' || t.type === 'review_refund_bonus' || (t.amount > 0 && t.type !== 'top_up'));
     }
-    if (filter === 'deductions') {
-      return transactions.filter(t => t.type === 'penalty_fine' || t.type === 'manual_review_fee' || t.amount < 0);
+    if (filter === 'penalties') {
+      return transactions.filter(t => t.type === 'penalty_fine');
+    }
+    if (filter === 'review_fees') {
+      return transactions.filter(t => t.type === 'manual_review_fee');
     }
     if (filter === 'topups') {
       return transactions.filter(t => t.type === 'top_up');
     }
     return transactions;
   }, [transactions, filter]);
+
+  const rewardsCount = useMemo(() => transactions.filter(t => t.type === 'reward' || t.type === 'review_refund_bonus' || (t.amount > 0 && t.type !== 'top_up')).length, [transactions]);
+  const penaltiesCount = useMemo(() => transactions.filter(t => t.type === 'penalty_fine').length, [transactions]);
+  const reviewFeesCount = useMemo(() => transactions.filter(t => t.type === 'manual_review_fee').length, [transactions]);
+  const topupsCount = useMemo(() => transactions.filter(t => t.type === 'top_up').length, [transactions]);
 
   const INITIAL_DISPLAY_COUNT = 5;
 
@@ -574,8 +628,12 @@ export function Wallet({ onSelectFine }: WalletProps) {
         {/* TAB 1: TRANSACTION HISTORY */}
         {activeTab === 'history' && (
           <View style={{ marginTop: 12 }}>
-            {/* Filter pills */}
-            <View style={styles.filterRow}>
+            {/* Filter pills with dedicated Review Fees category and smooth horizontal scroll */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterScrollRow}
+            >
               <TouchableOpacity
                 style={[
                   styles.filterPill,
@@ -596,34 +654,46 @@ export function Wallet({ onSelectFine }: WalletProps) {
                 onPress={() => setFilter('rewards')}
               >
                 <Text style={[styles.filterPillText, { color: filter === 'rewards' ? colors.valid : colors.muted }]}>
-                  {t('rewards')}
+                  {t('rewards')} ({rewardsCount})
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
                   styles.filterPill,
-                  { borderColor: filter === 'deductions' ? colors.signal : colors.edge, backgroundColor: filter === 'deductions' ? 'rgba(239, 68, 68, 0.12)' : colors.surface },
+                  { borderColor: filter === 'penalties' ? colors.signal : colors.edge, backgroundColor: filter === 'penalties' ? 'rgba(239, 68, 68, 0.12)' : colors.surface },
                 ]}
-                onPress={() => setFilter('deductions')}
+                onPress={() => setFilter('penalties')}
               >
-                <Text style={[styles.filterPillText, { color: filter === 'deductions' ? colors.signal : colors.muted }]}>
-                  {t('penalties')}
+                <Text style={[styles.filterPillText, { color: filter === 'penalties' ? colors.signal : colors.muted }]}>
+                  {t('penalties')} ({penaltiesCount})
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
                   styles.filterPill,
-                  { borderColor: filter === 'topups' ? colors.accent : colors.edge, backgroundColor: filter === 'topups' ? 'rgba(245, 158, 11, 0.12)' : colors.surface },
+                  { borderColor: filter === 'review_fees' ? colors.accent : colors.edge, backgroundColor: filter === 'review_fees' ? 'rgba(245, 158, 11, 0.12)' : colors.surface },
+                ]}
+                onPress={() => setFilter('review_fees')}
+              >
+                <Text style={[styles.filterPillText, { color: filter === 'review_fees' ? colors.accent : colors.muted }]}>
+                  {isUrdu ? 'انسانی جائزہ فیس' : 'Review Fees'} ({reviewFeesCount})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterPill,
+                  { borderColor: filter === 'topups' ? colors.telemetry : colors.edge, backgroundColor: filter === 'topups' ? 'rgba(6, 182, 212, 0.12)' : colors.surface },
                 ]}
                 onPress={() => setFilter('topups')}
               >
-                <Text style={[styles.filterPillText, { color: filter === 'topups' ? colors.accent : colors.muted }]}>
-                  {t('recharges')}
+                <Text style={[styles.filterPillText, { color: filter === 'topups' ? colors.telemetry : colors.muted }]}>
+                  {t('recharges')} ({topupsCount})
                 </Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
 
             {/* Transaction List */}
             {isLoading ? (
@@ -1098,6 +1168,12 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 12,
     flexWrap: 'wrap',
+  },
+  filterScrollRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingBottom: 4,
+    marginBottom: 10,
   },
   filterPill: {
     paddingHorizontal: 10,
