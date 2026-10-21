@@ -106,6 +106,58 @@ type ReportRow = {
 export type VaultCategory = 'all' | 'accepted' | 'under_review' | 'rejected';
 const INITIAL_DISPLAY_COUNT = 5;
 
+function EvidenceImage({
+  uri,
+  style,
+  resizeMode = 'cover',
+  isViolationMoment = false,
+}: {
+  uri: string;
+  style: any;
+  resizeMode?: 'cover' | 'contain';
+  isViolationMoment?: boolean;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError || !uri) {
+    return (
+      <View
+        style={[
+          style,
+          {
+            backgroundColor: 'rgba(30, 41, 59, 0.7)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 4,
+          },
+        ]}
+      >
+        <ShieldAlert size={16} color={isViolationMoment ? '#ef4444' : '#64748b'} />
+        <Text
+          style={{
+            fontSize: 8,
+            color: '#94a3b8',
+            marginTop: 2,
+            fontWeight: '700',
+            textAlign: 'center',
+          }}
+        >
+          {isViolationMoment ? 'VIOLATION' : 'KEYFRAME'}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => setHasError(true)}
+    />
+  );
+}
+
 export function Vault() {
   const { colors } = useTheme();
   const { t, isUrdu } = useLanguage();
@@ -290,6 +342,8 @@ export function Vault() {
             ai_verdict: r.ai_verdict,
           });
 
+          const rFrames = await getReportFrames(r.report_id, r.client_capture_id, r.frame_uris);
+
           combined.push({
             report_id: r.report_id,
             claimed_class: r.claimed_class,
@@ -303,7 +357,7 @@ export function Vault() {
             plate_number: r.citizen_plate || r.vehicle_plate || undefined,
             officer_verdict: r.officer_verdict,
             officer_note: r.officer_note,
-            frame_uris: Array.isArray(r.frame_uris) && r.frame_uris.length > 0 ? r.frame_uris : undefined,
+            frame_uris: rFrames.length > 0 ? rFrames : (Array.isArray(r.frame_uris) && r.frame_uris.length > 0 ? r.frame_uris : undefined),
             client_capture_id: r.client_capture_id,
             citizen_plate: r.citizen_plate,
             citizen_vehicle_model: r.citizen_vehicle_model,
@@ -991,10 +1045,11 @@ export function Vault() {
                                 },
                               ]}
                             >
-                              <Image
-                                source={{ uri: fUri }}
+                              <EvidenceImage
+                                uri={fUri}
                                 style={styles.cardFrameThumb}
                                 resizeMode="cover"
+                                isViolationMoment={isVioMoment}
                               />
                               <View style={[styles.cardFramePill, isVioMoment && { backgroundColor: '#ef4444' }]}>
                                 <Text style={styles.cardFramePillText}>
@@ -1341,10 +1396,11 @@ export function Vault() {
                           activeOpacity={0.85}
                           onPress={() => setZoomFrameIndex(idx)}
                         >
-                          <Image
-                            source={{ uri: fUri }}
+                          <EvidenceImage
+                            uri={fUri}
                             style={styles.dossierFrameImage}
                             resizeMode="cover"
+                            isViolationMoment={isVioMoment}
                           />
                           <View style={styles.dossierFrameTopPills}>
                             <View
@@ -1819,10 +1875,11 @@ export function Vault() {
                           paddingHorizontal: 8,
                         }}
                       >
-                        <Image
-                          source={{ uri: fUri }}
+                        <EvidenceImage
+                          uri={fUri}
                           style={styles.lightboxImage}
                           resizeMode="contain"
+                          isViolationMoment={true}
                         />
                       </View>
                     ))}

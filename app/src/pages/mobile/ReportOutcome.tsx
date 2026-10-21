@@ -62,7 +62,7 @@ interface ReportOutcomeProps {
   aiResult: AiEvidentiaryResult;
   reportId?: string;
   onGoToVault: () => void;
-  onRecordAnother: () => void;
+  onRecordAnother?: () => void;
   onGoToWallet?: () => void;
 }
 
@@ -819,11 +819,6 @@ export function ReportOutcome({
                 : (isUrdu ? 'والٹ میں محفوظ کریں (-50 جرمانہ)' : 'Acknowledge & Close to Vault (-PKR 50 Penalty)')}
             </Text>
             <ChevronRight size={18} color="#000" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.edge }]} onPress={onRecordAnother}>
-            <Camera size={16} color={colors.ink} />
-            <Text style={[styles.secondaryBtnText, { color: colors.ink }]}>{isUrdu ? 'ایک اور ویڈیو ریکارڈ کریں' : 'Record Another Violation'}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

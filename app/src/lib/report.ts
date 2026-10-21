@@ -372,7 +372,7 @@ export async function uploadEvidenceToStorage(
     console.warn('Video upload skipped:', err);
   }
 
-  // 2. Upload Keyframe Images — read as Base64 from disk then upload via fetch+blob
+  // 2. Upload Keyframe Images — read as Base64 then upload natively via FileSystem.uploadAsync
   try {
     if (framesBase64 && framesBase64.length > 0) {
       for (let i = 0; i < framesBase64.length; i++) {
@@ -380,33 +380,35 @@ export async function uploadEvidenceToStorage(
         if (!b64) continue;
         const framePath = `${clientCaptureId}/frame_${i + 1}.jpg`;
 
-        // If already a file URI, fetch it directly as blob
-        let frameBlob: Blob;
         let tempFileUri: string | null = null;
         try {
           if (typeof b64 === 'string' && b64.startsWith('file://')) {
-            const r = await fetch(b64);
-            frameBlob = await r.blob();
+            tempFileUri = b64;
           } else {
-            // Write base64 to temporary cache file first so native fetch uses file:// scheme
-            // (Android java.net.URL rejects data: protocol with MalformedURLException)
+            // Write base64 to temporary cache file first so native upload uses file:// scheme
             const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
             tempFileUri = `${FileSystem.cacheDirectory || FileSystem.documentDirectory}temp_vault_up_${Date.now()}_${i}.jpg`;
             await FileSystem.writeAsStringAsync(tempFileUri, cleanB64, {
               encoding: FileSystem.EncodingType.Base64,
             });
-            const r = await fetch(tempFileUri);
-            frameBlob = await r.blob();
           }
 
-          const { error: fErr } = await supabase.storage
-            .from('evidence_vault')
-            .upload(framePath, frameBlob, {
-              contentType: 'image/jpeg',
-              upsert: true,
-            });
+          const { data: session } = await supabase.auth.getSession();
+          const token = session?.session?.access_token || supabaseAnonKey;
+          const uploadUrl = `${supabaseUrl}/storage/v1/object/evidence_vault/${framePath}`;
 
-          if (!fErr) {
+          const uploadResult = await FileSystem.uploadAsync(uploadUrl, tempFileUri, {
+            httpMethod: 'POST',
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            headers: {
+              'apikey': supabaseAnonKey,
+              'Authorization': `Bearer ${token}`,
+              'x-upsert': 'true',
+              'Content-Type': 'image/jpeg',
+            },
+          });
+
+          if (uploadResult.status === 200 || uploadResult.status === 201) {
             const { data: pubUrl } = supabase.storage
               .from('evidence_vault')
               .getPublicUrl(framePath);
@@ -414,10 +416,10 @@ export async function uploadEvidenceToStorage(
               frameUrls.push(pubUrl.publicUrl);
             }
           } else {
-            console.warn('Frame upload notice:', fErr.message);
+            console.warn('Frame upload notice status:', uploadResult.status, uploadResult.body);
           }
         } finally {
-          if (tempFileUri) {
+          if (tempFileUri && tempFileUri.includes('temp_vault_up_')) {
             await FileSystem.deleteAsync(tempFileUri, { idempotent: true }).catch(() => {});
           }
         }
@@ -432,19 +434,19 @@ export async function uploadEvidenceToStorage(
 
 /**
  * Retrieves the 3 cached video frame file paths for a report.
- * Checks existing fallback URIs first, then scans local disk for persisted frames.
+ * Checks local disk for persisted frames first, then validates fallback URIs.
  */
 export async function getReportFrames(
   reportId: string,
   clientCaptureId?: string,
   fallbackUris?: string[]
 ): Promise<string[]> {
-  if (fallbackUris && fallbackUris.length > 0) return fallbackUris;
   const uris: string[] = [];
   try {
     const dir = `${FileSystem.documentDirectory}vault_frames/`;
-    const safeIds: string[] = [reportId.replace(/[^a-zA-Z0-9_-]/g, '_')];
-    if (clientCaptureId) {
+    const safeIds: string[] = [];
+    if (reportId) safeIds.push(reportId.replace(/[^a-zA-Z0-9_-]/g, '_'));
+    if (clientCaptureId && clientCaptureId !== reportId) {
       safeIds.push(clientCaptureId.replace(/[^a-zA-Z0-9_-]/g, '_'));
     }
     for (const sid of safeIds) {
@@ -455,10 +457,31 @@ export async function getReportFrames(
           uris.push(p);
         }
       }
-      if (uris.length > 0) break;
+      if (uris.length > 0) return uris;
     }
-  } catch { }
-  return uris;
+  } catch {}
+
+  // Fallback to existing fallback URIs (validating file existence if local URI)
+  if (fallbackUris && fallbackUris.length > 0) {
+    const validLocal: string[] = [];
+    const remoteUrls: string[] = [];
+    for (const u of fallbackUris) {
+      if (typeof u === 'string') {
+        if (u.startsWith('file://')) {
+          try {
+            const info = await FileSystem.getInfoAsync(u);
+            if (info.exists) validLocal.push(u);
+          } catch {}
+        } else if (u.startsWith('http://') || u.startsWith('https://')) {
+          remoteUrls.push(u);
+        }
+      }
+    }
+    if (validLocal.length > 0) return validLocal;
+    if (remoteUrls.length > 0) return remoteUrls;
+  }
+
+  return [];
 }
 
 export async function uploadReport(
@@ -524,14 +547,22 @@ export async function uploadReport(
     }
   }
 
-  // Cache ONLY confirmed violation frames as local images on disk for evidence inspection in Vault
+  // Cache incident keyframes on local disk for evidence inspection in Vault (for accepted, rejected, and under-review)
+  const framesToSave = (aiResult?.framesBase64 && aiResult.framesBase64.length > 0)
+    ? aiResult.framesBase64
+    : (clip.framesBase64 && clip.framesBase64.length > 0 ? clip.framesBase64 : []);
+
   let frameUris: string[] = [];
-  if (isAccepted && aiResult?.framesBase64 && aiResult.framesBase64.length > 0) {
-    frameUris = await saveFramesToDisk(finalReportId, aiResult.framesBase64);
+  if (framesToSave.length > 0) {
+    frameUris = await saveFramesToDisk(finalReportId, framesToSave);
   }
 
   // Ensure valid UUID for client_capture_id (required by PostgreSQL schema)
   const validCaptureUuid = UUID_REGEX.test(clip.clientCaptureId) ? clip.clientCaptureId : Crypto.randomUUID();
+
+  if (framesToSave.length > 0 && validCaptureUuid && validCaptureUuid !== finalReportId) {
+    await saveFramesToDisk(validCaptureUuid, framesToSave);
+  }
 
   // 1. Upload Video & Keyframes to Supabase Storage evidence_vault
   let remoteVideoUrl: string | null = null;
@@ -540,7 +571,7 @@ export async function uploadReport(
     const uploadRes = await uploadEvidenceToStorage(
       validCaptureUuid,
       clip.uri,
-      aiResult?.framesBase64 || clip.framesBase64
+      framesToSave
     );
     remoteVideoUrl = uploadRes.videoUrl;
     remoteFrameUrls = uploadRes.frameUrls;
@@ -586,7 +617,7 @@ export async function uploadReport(
     aiResult,
     rewardPkr,
     penaltyPkr,
-    frameUris: remoteFrameUrls.length > 0 ? remoteFrameUrls : frameUris,
+    frameUris: frameUris.length > 0 ? frameUris : remoteFrameUrls,
   };
   await saveLocalReport(localRecord);
 
@@ -1131,5 +1162,98 @@ export async function clearReportsCache(userId?: string): Promise<void> {
     }
     await AsyncStorage.multiRemove(keys);
   } catch {}
+}
+
+/**
+ * Returns consolidated reporter stats (approved, rejected, underReview, total, trustScore)
+ * matching the exact deduplicated, deleted-filtered, and canonical status logic of Evidence Vault.
+ */
+export async function getConsolidatedReporterStats(userId?: string): Promise<{
+  approved: number;
+  rejected: number;
+  underReview: number;
+  total: number;
+  trustScore: number;
+}> {
+  try {
+    const deletedIds = new Set(await getDeletedReportIds());
+    const localList = await getLocalReports();
+    const filteredLocal = localList.filter(
+      item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId) && (!userId || !item.reporterId || item.reporterId === userId)
+    );
+
+    let remoteList: any[] = [];
+    if (userId) {
+      const { data, error } = await supabase
+        .from('reports')
+        .select('report_id,client_capture_id,status,officer_verdict,ai_verdict')
+        .eq('reporter_id', userId)
+        .limit(200);
+      if (!error && data) {
+        remoteList = data;
+      }
+    }
+
+    const seen = new Set<string>();
+    let approved = 0;
+    let rejected = 0;
+    let underReview = 0;
+
+    for (const l of filteredLocal) {
+      seen.add(l.reportId);
+      if (l.clientCaptureId) seen.add(l.clientCaptureId);
+      const remoteMatch = remoteList.find(r =>
+        r.report_id === l.reportId || (r.client_capture_id && (r.client_capture_id === l.clientCaptureId || r.client_capture_id === l.reportId))
+      );
+
+      const status = resolveCanonicalReportStatus({
+        status: remoteMatch ? remoteMatch.status : l.status,
+        officerVerdict: remoteMatch?.officer_verdict || l.officerVerdict,
+        officer_verdict: remoteMatch?.officer_verdict,
+        ai_verdict: remoteMatch?.ai_verdict,
+        aiResult: l.aiResult,
+        penaltyPkr: l.penaltyPkr,
+        rewardPkr: l.rewardPkr,
+      });
+
+      if (status === 'accepted') approved++;
+      else if (status === 'rejected') rejected++;
+      else underReview++;
+    }
+
+    for (const r of remoteList) {
+      if (deletedIds.has(r.report_id) || (r.client_capture_id && deletedIds.has(r.client_capture_id))) continue;
+      const alreadyInLocal = seen.has(r.report_id) || (r.client_capture_id && seen.has(r.client_capture_id));
+      if (!alreadyInLocal) {
+        seen.add(r.report_id);
+        if (r.client_capture_id) seen.add(r.client_capture_id);
+        const status = resolveCanonicalReportStatus({
+          status: r.status,
+          officer_verdict: r.officer_verdict,
+          ai_verdict: r.ai_verdict,
+        });
+        if (status === 'accepted') approved++;
+        else if (status === 'rejected') rejected++;
+        else underReview++;
+      }
+    }
+
+    const totalResolved = approved + rejected;
+    let trustScore = 100;
+    if (totalResolved > 0) {
+      trustScore = Math.max(0, Math.min(100, Math.round((approved / totalResolved) * 100)));
+    }
+
+    return {
+      approved,
+      rejected,
+      underReview,
+      total: approved + rejected + underReview,
+      trustScore,
+    };
+  } catch (err) {
+    console.warn('Error calculating consolidated stats:', err);
+    return { approved: 0, rejected: 0, underReview: 0, total: 0, trustScore: 100 };
+  }
 }
 
