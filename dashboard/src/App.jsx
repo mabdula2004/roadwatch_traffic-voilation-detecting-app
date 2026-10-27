@@ -5,6 +5,10 @@ import { CommandSidebar } from './components/CommandSidebar';
 import { PendingQueueWorkspace } from './components/PendingQueueWorkspace';
 import { CaseListWorkspace } from './components/CaseListWorkspace';
 import { ReporterRegistryWorkspace } from './components/ReporterRegistryWorkspace';
+import { AdminDivisionWorkspace } from './components/AdminDivisionWorkspace';
+import { AuthPortal } from './components/AuthPortal';
+import { DIVISIONS, INITIAL_OFFICERS } from './data/divisions';
+import { getStoredSession, saveSession, clearSession } from './data/authStore';
 
 const VIOLATION_MAP = {
   red_light_running: { name: 'Red Light Violation (Signal Jump)', fine: 2000 },
@@ -24,11 +28,108 @@ const VIOLATION_MAP = {
 };
 
 export function App() {
-  const [activeTab, setActiveTab] = useState('Pending Queue');
+  // 1. Current Authenticated User (Strict Role-Based Session)
+  const [currentUser, setCurrentUser] = useState(() => {
+    return getStoredSession();
+  });
+
+  const currentRole = currentUser?.role || 'review_officer'; // 'division_admin' | 'review_officer'
+  const currentDivisionId = currentUser?.divisionId || 'lahore_div';
+
+  const currentDivision = useMemo(() => {
+    return DIVISIONS.find((d) => d.id === currentDivisionId) || DIVISIONS[0];
+  }, [currentDivisionId]);
+
+  // Tab State: strictly role-separated
+  const [activeTab, setActiveTab] = useState(() => {
+    return currentUser?.role === 'division_admin'
+      ? 'Division Administration'
+      : 'Pending Queue';
+  });
+
+  // Officers State (stored in localStorage with fallback to INITIAL_OFFICERS)
+  const [officers, setOfficers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rw_officers');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { }
+    return INITIAL_OFFICERS;
+  });
+
   const [cases, setCases] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Handle successful login or registration
+  const handleLoginSuccess = (user) => {
+    saveSession(user);
+    setCurrentUser(user);
+    setActiveTab(
+      user.role === 'division_admin' ? 'Division Administration' : 'Pending Queue'
+    );
+  };
+
+  // Handle Logout / End Shift (NO SWITCH PORTAL BUTTON - True Sign Out)
+  const handleLogout = () => {
+    clearSession();
+    setCurrentUser(null);
+  };
+
+  // Save officers changes to localStorage
+  const persistOfficers = (updated) => {
+    setOfficers(updated);
+    try {
+      localStorage.setItem('rw_officers', JSON.stringify(updated));
+    } catch { }
+  };
+
+  // Add / Provision New Officer (Admin Only)
+  const handleAddOfficer = async (newOfficer) => {
+    const updated = [newOfficer, ...officers];
+    persistOfficers(updated);
+
+    // Attempt to register in Supabase if online
+    try {
+      const { data: newUser } = await supabase
+        .from('base_users')
+        .insert({
+          name: newOfficer.name,
+          email: newOfficer.email,
+          role: 'officer',
+          account_state: 'active',
+        })
+        .select('user_id')
+        .single();
+
+      if (newUser?.user_id) {
+        await supabase.from('officer_profiles').insert({
+          officer_id: newUser.user_id,
+          badge_id: newOfficer.badge,
+          duty_role: newOfficer.rank,
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase officer registration note:', err);
+    }
+  };
+
+  // Update Officer Status (active / on_leave / suspended)
+  const handleUpdateOfficerStatus = (officerId, newStatus) => {
+    const updated = officers.map((o) =>
+      o.id === officerId ? { ...o, status: newStatus } : o
+    );
+    persistOfficers(updated);
+  };
+
+  // Delete Officer
+  const handleDeleteOfficer = (officerId) => {
+    const updated = officers.filter((o) => o.id !== officerId);
+    persistOfficers(updated);
+  };
 
   const fetchCases = async () => {
     setIsRefreshing(true);
@@ -107,7 +208,7 @@ export function App() {
           reporterId: r.reporter_id,
           reporterName: userMap.get(r.reporter_id) || 'Verified Citizen',
           reporterTrust: trustMap.get(r.reporter_id) ?? 100,
-          city: 'Lahore',
+          city: currentDivision.shortName,
           locationName: r.location_name || 'Location Not Specified',
           submittedAt: timeAgo,
           rawDate: dateObj.toLocaleDateString('en-PK', { hour: '2-digit', minute: '2-digit' }),
@@ -225,7 +326,6 @@ export function App() {
   const handleApproveCase = async (caseItem, note) => {
     setIsProcessing(true);
     try {
-      // 1. Update report status in Supabase
       await supabase
         .from('reports')
         .update({
@@ -236,10 +336,8 @@ export function App() {
         })
         .eq('report_id', caseItem.reportId);
 
-      // 2. Re-compute and update citizen's trust score based on accuracy
       await syncReporterTrustScore(caseItem.reporterId);
 
-      // 3. Credit citizen wallet: PKR 100 review refund + PKR 200 reward bonus = PKR 300!
       try {
         await supabase.rpc('credit_citizen_reward_payout', {
           p_report_id: caseItem.reportId,
@@ -247,7 +345,6 @@ export function App() {
         });
       } catch { }
 
-      // Refresh list
       await fetchCases();
     } catch (e) {
       console.error('Approve violation notice:', e);
@@ -270,9 +367,7 @@ export function App() {
         })
         .eq('report_id', caseItem.reportId);
 
-      // Re-compute and update citizen's trust score based on accuracy
       await syncReporterTrustScore(caseItem.reporterId);
-
       await fetchCases();
     } catch (e) {
       console.error('Reject violation notice:', e);
@@ -281,9 +376,24 @@ export function App() {
     }
   };
 
+  // Division officers count
+  const currentDivisionOfficersCount = officers.filter(
+    (o) => o.divisionId === currentDivision.id
+  ).length;
+
+  // =========================================================================
+  // AUTH GUARD: If user is not logged in, show AuthPortal Gateway
+  // =========================================================================
+  if (!currentUser) {
+    return <AuthPortal onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // =========================================================================
+  // LOGGED IN DASHBOARD (Strict Role Enforcement)
+  // =========================================================================
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-canvas text-ink">
-      {/* 1. Master Portal Header */}
+      {/* 1. Master Portal Header (With Logout / End Shift - NO SWITCH BUTTON!) */}
       <PortalHeader
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -292,11 +402,15 @@ export function App() {
         approvedCount={approvedCases.length}
         onRefresh={fetchCases}
         isRefreshing={isRefreshing}
+        currentDivision={currentDivision}
+        currentRole={currentRole}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* 2. Main Workspace Body: Sidebar + Active View */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left Navigation Sidebar */}
+        {/* Left Navigation Sidebar (Role Restricted!) */}
         <CommandSidebar
           activeTab={activeTab}
           onSelectTab={setActiveTab}
@@ -304,10 +418,28 @@ export function App() {
           disputedCount={disputedCases.length}
           approvedCount={approvedCases.length}
           rejectedCount={rejectedCases.length}
+          divisionOfficersCount={currentDivisionOfficersCount}
+          currentDivision={currentDivision}
+          currentRole={currentRole}
+          currentUser={currentUser}
         />
 
         {/* Dynamic Center Workspaces */}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
+          {/* DIVISION ADMIN WORKSPACE (Accessible ONLY if currentRole === 'division_admin') */}
+          {activeTab === 'Division Administration' && currentRole === 'division_admin' && (
+            <AdminDivisionWorkspace
+              currentDivision={currentDivision}
+              currentRole={currentRole}
+              officers={officers}
+              onAddOfficer={handleAddOfficer}
+              onUpdateOfficerStatus={handleUpdateOfficerStatus}
+              onDeleteOfficer={handleDeleteOfficer}
+              onSelectOfficerToReview={() => setActiveTab('Pending Queue')}
+              todayCasesCount={approvedCases.length + rejectedCases.length}
+            />
+          )}
+
           {activeTab === 'Pending Queue' && (
             <PendingQueueWorkspace
               cases={pendingCases}
