@@ -29,6 +29,7 @@ import { useLanguage, type Language } from '../../contexts/LanguageContext';
 import { OptionSheet } from '../../components/mobile/OptionSheet';
 import { NotificationSheet } from '../../components/mobile/NotificationSheet';
 import { supabase } from '../../lib/supabase';
+import { getConsolidatedReporterStats } from '../../lib/report';
 
 interface SettingsProps {
   onLogout?: () => void;
@@ -56,44 +57,29 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
         const { data: auth } = await supabase.auth.getUser();
         const userId = auth?.user?.id;
 
-        const [reporter, reports] = await Promise.all([
-          userId
-            ? supabase.from('reporter_profiles').select('trust_score').eq('reporter_id', userId).maybeSingle()
-            : supabase.from('reporter_profiles').select('trust_score').maybeSingle(),
-          supabase.from('reports').select('status').in('status', ['accepted', 'approved', 'rejected']),
-        ]);
+        if (!userId) {
+          if (alive) {
+            setStats({ approved: 0, rejected: 0 });
+            setTrustScore(100);
+          }
+          return;
+        }
+
+        const consolidated = await getConsolidatedReporterStats(userId);
 
         if (alive) {
-          const approvedCount = reports.data
-            ? reports.data.filter((r) => r.status === 'accepted' || r.status === 'approved').length
-            : 0;
-          const rejectedCount = reports.data
-            ? reports.data.filter((r) => r.status === 'rejected').length
-            : 0;
-          const totalResolved = approvedCount + rejectedCount;
-
           setStats({
-            approved: approvedCount,
-            rejected: rejectedCount,
+            approved: consolidated.approved,
+            rejected: consolidated.rejected,
           });
 
-          // Dynamic calculation: If reporter has reviewed reports, Trust Score matches their genuine accuracy!
-          let finalScore = 100;
-          if (totalResolved > 0) {
-            finalScore = Math.max(0, Math.min(100, Math.round((approvedCount / totalResolved) * 100)));
-          } else if (!reporter.error && reporter.data?.trust_score !== null && reporter.data?.trust_score !== undefined) {
-            finalScore = reporter.data.trust_score;
-          }
-
-          setTrustScore(finalScore);
+          setTrustScore(consolidated.trustScore);
 
           // Sync computed score back to Supabase reporter_profiles
-          if (userId && (!reporter.data || reporter.data.trust_score !== finalScore)) {
-            void supabase
-              .from('reporter_profiles')
-              .update({ trust_score: finalScore })
-              .eq('reporter_id', userId);
-          }
+          void supabase
+            .from('reporter_profiles')
+            .update({ trust_score: consolidated.trustScore })
+            .eq('reporter_id', userId);
         }
       } catch {
         if (alive) setTrustScore(100);
@@ -115,13 +101,23 @@ export function Settings({ onLogout, onNavigate }: SettingsProps) {
       void supabase.removeChannel(channel);
     };
   }, []);
+
   useEffect(() => {
     let alive = true;
-    void supabase.from('reporter_profiles').select('language,theme').single().then(({ data }) => {
+    async function loadPreferences() {
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id;
+      if (!userId) return;
+      const { data } = await supabase
+        .from('reporter_profiles')
+        .select('language,theme')
+        .eq('reporter_id', userId)
+        .maybeSingle();
       if (!alive || !data) return;
       if (data.language === 'ur' || data.language === 'en') setLanguage(data.language);
       if (data.theme === 'dark' || data.theme === 'light' || data.theme === 'system') setTheme(data.theme);
-    });
+    }
+    void loadPreferences();
     return () => { alive = false; };
   }, []);
   async function savePreference(values: { language?: Language; theme?: Theme }) {

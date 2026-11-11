@@ -394,6 +394,7 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           plateStatus: 'clear',
           plateNumber: null,
           plateConfidence: 0,
+          confidenceScore: 0,
           clarityScore: 100,
           rejectionReason: 'none',
           vehicleMakeModel: 'Pending Sync',
@@ -895,23 +896,25 @@ export function ReportReview({ clip, onBack, onSubmit }: ReportReviewProps) {
           </Text>
         </TouchableOpacity>
 
-        {/* Action 2: Remake / Retake Video */}
-        <TouchableOpacity
-          style={[
-            styles.remakeFullBtn,
-            {
-              backgroundColor: 'rgba(239, 68, 68, 0.08)',
-              borderColor: 'rgba(239, 68, 68, 0.35)',
-            },
-          ]}
-          onPress={handleRemakeVideo}
-          disabled={submitting}
-        >
-          <RotateCcw size={16} color="#ef4444" />
-          <Text style={[styles.remakeFullBtnText, { color: '#ef4444' }]}>
-            {isUrdu ? 'ویڈیو مسترد کریں اور نئی ویڈیو بنائیں' : 'Discard & Remake Video'}
-          </Text>
-        </TouchableOpacity>
+        {/* Action 2: Remake / Retake Video - Hidden once submitted for AI analysis */}
+        {!submitting && (
+          <TouchableOpacity
+            style={[
+              styles.remakeFullBtn,
+              {
+                backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                borderColor: 'rgba(239, 68, 68, 0.35)',
+              },
+            ]}
+            onPress={handleRemakeVideo}
+            disabled={submitting}
+          >
+            <RotateCcw size={16} color="#ef4444" />
+            <Text style={[styles.remakeFullBtnText, { color: '#ef4444' }]}>
+              {isUrdu ? 'ویڈیو مسترد کریں اور نئی ویڈیو بنائیں' : 'Discard & Remake Video'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <Text style={styles.footerNote}>
           {isUrdu

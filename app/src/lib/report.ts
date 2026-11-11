@@ -1,9 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
-import { supabase } from './supabase';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 import { AiEvidentiaryResult } from './aiAnalysis';
 import { rechargeWalletBalance, deductWalletBalance } from './wallet';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface CapturedClip {
   clientCaptureId: string;
@@ -25,6 +28,7 @@ export interface CapturedClip {
 export interface StoredCaseReport {
   reportId: string;
   clientCaptureId: string;
+  reporterId?: string;
   claimedClass: string;
   capturedAt: string;
   uploadedAt: string;
@@ -43,6 +47,9 @@ export interface StoredCaseReport {
   officerVerdictAt?: string;
   officerNote?: string;
   frameUris?: string[];
+  videoUri?: string;
+  videoUrl?: string;
+  confidenceScore?: number;
   // Citizen Manual Corrections / Overrides
   citizenPlate?: string;
   citizenVehicleMakeModel?: string;
@@ -78,12 +85,93 @@ export interface PenaltyCitation {
   plateNumber?: string;
 }
 
-const LOCAL_VAULT_KEY = '@roadwatch_local_vault_reports';
-const CITATIONS_KEY = '@roadwatch_reporter_citations';
+export type CanonicalReportStatus = 'accepted' | 'under_review' | 'rejected';
+
+/**
+ * Authoritative status resolver for RoadWatch reports across mobile app & database sync.
+ *
+ * Rules hierarchy:
+ * 1. Certified Officer final verdict from dashboard ALWAYS takes supreme priority (accepted / rejected).
+ * 2. Active human dispute (citizen explicitly paid PKR 100 review fee) -> 'under_review'.
+ * 3. AI Confirmed / Accepted Violation -> ALWAYS 'accepted' (+PKR 200 bounty reward).
+ * 4. Otherwise -> uncontested invalid submission -> 'rejected' (-PKR 50 penalty).
+ */
+export function resolveCanonicalReportStatus(r: {
+  status?: string | null;
+  officer_verdict?: string | null;
+  officerVerdict?: string | null;
+  ai_verdict?: string | null;
+  aiResult?: any;
+  ai_result?: any;
+  penaltyPkr?: number;
+  penalty_pkr?: number;
+  rewardPkr?: number;
+  reward_pkr?: number;
+}): CanonicalReportStatus {
+  // 1. Certified Officer final verdict from dashboard
+  const officerVerdict = r.officer_verdict || r.officerVerdict;
+  if (officerVerdict === 'accepted') return 'accepted';
+  if (officerVerdict === 'rejected') return 'rejected';
+
+  // 2. Active human review / dispute (citizen explicitly paid PKR 100 fee)
+  const rawStatus = r.status;
+  if (
+    rawStatus === 'under_review' ||
+    rawStatus === 'pending_manual_review' ||
+    rawStatus === 'disputed'
+  ) {
+    return 'under_review';
+  }
+
+  // 3. AI Confirmed / Accepted Violation -> ALWAYS APPROVED!
+  const aiRes = r.aiResult || r.ai_result;
+  const isAiFined = Boolean(
+    aiRes &&
+    aiRes.status === 'fined' &&
+    aiRes.violationDetected
+  );
+  const isAiAccepted = r.ai_verdict === 'accepted' || isAiFined;
+
+  if (
+    rawStatus === 'accepted' ||
+    rawStatus === 'fined' ||
+    isAiAccepted
+  ) {
+    return 'accepted';
+  }
+
+  // 4. Otherwise, it is an uncontested rejected / invalid clip (penalty fine applies)
+  return 'rejected';
+}
+
+async function getActiveUserId(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getUser();
+    return data?.user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getVaultStorageKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_local_vault_reports_${uid}` : '@roadwatch_local_vault_reports';
+}
+
+async function getCitationsStorageKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_reporter_citations_${uid}` : '@roadwatch_reporter_citations';
+}
+
+async function getDeletedReportsStorageKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_deleted_report_ids_${uid}` : '@roadwatch_deleted_report_ids';
+}
 
 export async function getPenaltyCitations(): Promise<PenaltyCitation[]> {
   try {
-    const raw = await AsyncStorage.getItem(CITATIONS_KEY);
+    const key = await getCitationsStorageKey();
+    const raw = await AsyncStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -92,10 +180,11 @@ export async function getPenaltyCitations(): Promise<PenaltyCitation[]> {
 
 export async function savePenaltyCitation(citation: PenaltyCitation): Promise<void> {
   try {
+    const key = await getCitationsStorageKey();
     const list = await getPenaltyCitations();
     const filtered = list.filter(c => c.reportId !== citation.reportId);
     filtered.unshift(citation);
-    await AsyncStorage.setItem(CITATIONS_KEY, JSON.stringify(filtered));
+    await AsyncStorage.setItem(key, JSON.stringify(filtered));
   } catch (e) {
     console.error('Failed to save penalty citation:', e);
   }
@@ -103,17 +192,17 @@ export async function savePenaltyCitation(citation: PenaltyCitation): Promise<vo
 
 export async function updateCitationStatus(reportId: string, status: PenaltyCitation['status']): Promise<void> {
   try {
+    const key = await getCitationsStorageKey();
     const list = await getPenaltyCitations();
     const updated = list.map(c => c.reportId === reportId ? { ...c, status } : c);
-    await AsyncStorage.setItem(CITATIONS_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(key, JSON.stringify(updated));
   } catch { }
 }
 
-const DELETED_REPORTS_KEY = '@roadwatch_deleted_report_ids';
-
 export async function getDeletedReportIds(): Promise<string[]> {
   try {
-    const raw = await AsyncStorage.getItem(DELETED_REPORTS_KEY);
+    const key = await getDeletedReportsStorageKey();
+    const raw = await AsyncStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -130,20 +219,22 @@ export async function deleteReports(reportIds: string[]): Promise<{ success: boo
 
   // 1. Persist deleted IDs
   try {
+    const delKey = await getDeletedReportsStorageKey();
     const existing = await getDeletedReportIds();
     const combined = Array.from(new Set([...existing, ...reportIds]));
-    await AsyncStorage.setItem(DELETED_REPORTS_KEY, JSON.stringify(combined));
+    await AsyncStorage.setItem(delKey, JSON.stringify(combined));
   } catch (e) {
     console.warn('Failed to save deleted report IDs:', e);
   }
 
   // 2. Remove from local vault storage
   try {
-    const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+    const vaultKey = await getVaultStorageKey();
+    const raw = await AsyncStorage.getItem(vaultKey);
     if (raw) {
       const list: StoredCaseReport[] = JSON.parse(raw);
       const remaining = list.filter(r => !toDelete.has(r.reportId) && !toDelete.has(r.clientCaptureId));
-      await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(remaining));
+      await AsyncStorage.setItem(vaultKey, JSON.stringify(remaining));
     }
   } catch (e) {
     console.error('Failed to remove reports from local vault:', e);
@@ -224,68 +315,117 @@ export async function uploadEvidenceToStorage(
   let videoUrl: string | null = null;
   const frameUrls: string[] = [];
 
-  // 1. Upload Video MP4 if available
+  // 1. Upload Video MP4 — use native FileSystem.uploadAsync first (fast native binary stream, zero React Native Blob overhead)
   try {
     if (videoUri) {
       const videoPath = `${clientCaptureId}/video.mp4`;
-      const formData = new FormData();
-      formData.append('file', {
-        uri: videoUri,
-        name: 'video.mp4',
-        type: 'video/mp4',
-      } as any);
+      let uploadSucceeded = false;
 
-      const { error: vErr } = await supabase.storage
-        .from('evidence_vault')
-        .upload(videoPath, formData, {
-          contentType: 'video/mp4',
-          upsert: true,
+      // Try native binary upload first
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        const token = session?.session?.access_token || supabaseAnonKey;
+        const uploadUrl = `${supabaseUrl}/storage/v1/object/evidence_vault/${videoPath}`;
+
+        const uploadResult = await FileSystem.uploadAsync(uploadUrl, videoUri, {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${token}`,
+            'x-upsert': 'true',
+            'Content-Type': 'video/mp4',
+          },
         });
 
-      if (!vErr) {
-        const { data: pubUrl } = supabase.storage
+        if (uploadResult.status === 200 || uploadResult.status === 201) {
+          uploadSucceeded = true;
+          const { data: pubUrl } = supabase.storage
+            .from('evidence_vault')
+            .getPublicUrl(videoPath);
+          videoUrl = pubUrl?.publicUrl || null;
+        }
+      } catch (nativeErr) {
+        console.log('Native upload fallback to standard:', nativeErr);
+      }
+
+      // Standard fallback with explicit video/mp4 type
+      if (!uploadSucceeded) {
+        const response = await fetch(videoUri);
+        const rawBlob = await response.blob();
+        const videoBlob = rawBlob.slice(0, rawBlob.size, 'video/mp4');
+
+        const { error: vErr } = await supabase.storage
           .from('evidence_vault')
-          .getPublicUrl(videoPath);
-        videoUrl = pubUrl?.publicUrl || null;
-      } else {
-        console.warn('Supabase video upload notice:', vErr.message);
+          .upload(videoPath, videoBlob, {
+            contentType: 'video/mp4',
+            upsert: true,
+          });
+
+        if (!vErr) {
+          const { data: pubUrl } = supabase.storage
+            .from('evidence_vault')
+            .getPublicUrl(videoPath);
+          videoUrl = pubUrl?.publicUrl || null;
+        } else {
+          console.warn('Supabase video upload notice:', vErr.message);
+        }
       }
     }
   } catch (err) {
     console.warn('Video upload skipped:', err);
   }
 
-  // 2. Upload Keyframe Images if available
+  // 2. Upload Keyframe Images — read as Base64 then upload natively via FileSystem.uploadAsync
   try {
     if (framesBase64 && framesBase64.length > 0) {
       for (let i = 0; i < framesBase64.length; i++) {
         const b64 = framesBase64[i];
         if (!b64) continue;
-        const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
         const framePath = `${clientCaptureId}/frame_${i + 1}.jpg`;
 
-        const binaryString = atob(cleanB64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let j = 0; j < binaryString.length; j++) {
-          bytes[j] = binaryString.charCodeAt(j);
-        }
+        let tempFileUri: string | null = null;
+        try {
+          if (typeof b64 === 'string' && b64.startsWith('file://')) {
+            tempFileUri = b64;
+          } else {
+            // Write base64 to temporary cache file first so native upload uses file:// scheme
+            const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+            tempFileUri = `${FileSystem.cacheDirectory || FileSystem.documentDirectory}temp_vault_up_${Date.now()}_${i}.jpg`;
+            await FileSystem.writeAsStringAsync(tempFileUri, cleanB64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+          }
 
-        const { error: fErr } = await supabase.storage
-          .from('evidence_vault')
-          .upload(framePath, bytes.buffer, {
-            contentType: 'image/jpeg',
-            upsert: true,
+          const { data: session } = await supabase.auth.getSession();
+          const token = session?.session?.access_token || supabaseAnonKey;
+          const uploadUrl = `${supabaseUrl}/storage/v1/object/evidence_vault/${framePath}`;
+
+          const uploadResult = await FileSystem.uploadAsync(uploadUrl, tempFileUri, {
+            httpMethod: 'POST',
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            headers: {
+              'apikey': supabaseAnonKey,
+              'Authorization': `Bearer ${token}`,
+              'x-upsert': 'true',
+              'Content-Type': 'image/jpeg',
+            },
           });
 
-        if (!fErr) {
-          const { data: pubUrl } = supabase.storage
-            .from('evidence_vault')
-            .getPublicUrl(framePath);
-          if (pubUrl?.publicUrl) {
-            frameUrls.push(pubUrl.publicUrl);
+          if (uploadResult.status === 200 || uploadResult.status === 201) {
+            const { data: pubUrl } = supabase.storage
+              .from('evidence_vault')
+              .getPublicUrl(framePath);
+            if (pubUrl?.publicUrl) {
+              frameUrls.push(pubUrl.publicUrl);
+            }
+          } else {
+            console.warn('Frame upload notice status:', uploadResult.status, uploadResult.body);
           }
-        } else {
-          console.warn('Frame upload notice:', fErr.message);
+        } finally {
+          if (tempFileUri && tempFileUri.includes('temp_vault_up_')) {
+            await FileSystem.deleteAsync(tempFileUri, { idempotent: true }).catch(() => {});
+          }
         }
       }
     }
@@ -298,21 +438,34 @@ export async function uploadEvidenceToStorage(
 
 /**
  * Retrieves the 3 cached video frame file paths for a report.
- * Checks existing fallback URIs first, then scans local disk for persisted frames.
+ * Checks local disk for persisted frames first, then validates fallback URIs.
  */
 export async function getReportFrames(
   reportId: string,
   clientCaptureId?: string,
-  fallbackUris?: string[]
+  fallbackUris?: string[],
+  videoUrl?: string | null
 ): Promise<string[]> {
-  if (fallbackUris && fallbackUris.length > 0) return fallbackUris;
   const uris: string[] = [];
   try {
     const dir = `${FileSystem.documentDirectory}vault_frames/`;
-    const safeIds: string[] = [reportId.replace(/[^a-zA-Z0-9_-]/g, '_')];
-    if (clientCaptureId) {
+    const safeIds: string[] = [];
+    if (reportId) safeIds.push(reportId.replace(/[^a-zA-Z0-9_-]/g, '_'));
+    if (clientCaptureId && clientCaptureId !== reportId) {
       safeIds.push(clientCaptureId.replace(/[^a-zA-Z0-9_-]/g, '_'));
     }
+    // Also extract safe ID prefix from any fallback local URIs if available
+    if (fallbackUris) {
+      for (const u of fallbackUris) {
+        if (typeof u === 'string' && u.includes('_frame_')) {
+          const m = u.match(/([a-zA-Z0-9_-]+)_frame_\d+\.jpg/);
+          if (m && m[1] && !safeIds.includes(m[1])) {
+            safeIds.push(m[1]);
+          }
+        }
+      }
+    }
+
     for (const sid of safeIds) {
       for (let i = 0; i < 3; i++) {
         const p = `${dir}${sid}_frame_${i}.jpg`;
@@ -321,10 +474,53 @@ export async function getReportFrames(
           uris.push(p);
         }
       }
-      if (uris.length > 0) break;
+      if (uris.length > 0) return uris;
     }
-  } catch { }
-  return uris;
+  } catch {}
+
+  // Fallback to existing fallback URIs (validating file existence if local URI)
+  if (fallbackUris && fallbackUris.length > 0) {
+    const validLocal: string[] = [];
+    const remoteUrls: string[] = [];
+    for (const u of fallbackUris) {
+      if (typeof u === 'string') {
+        if (u.startsWith('file://')) {
+          try {
+            const info = await FileSystem.getInfoAsync(u);
+            if (info.exists) validLocal.push(u);
+          } catch {}
+        } else if (u.startsWith('http://') || u.startsWith('https://')) {
+          remoteUrls.push(u);
+        }
+      }
+    }
+    if (validLocal.length > 0) return validLocal;
+    if (remoteUrls.length > 0) return remoteUrls;
+  }
+
+  // Fallback: On-demand thumbnail extraction from video URL if frames were missing
+  if (uris.length === 0 && videoUrl && typeof videoUrl === 'string' && (videoUrl.startsWith('http') || videoUrl.startsWith('file://'))) {
+    try {
+      const safeId = (reportId || clientCaptureId || 'frame').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const dir = `${FileSystem.documentDirectory}vault_frames/`;
+      const dirInfo = await FileSystem.getInfoAsync(dir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      }
+      const targetFile = `${dir}${safeId}_frame_0.jpg`;
+      const thumb = await VideoThumbnails.getThumbnailAsync(videoUrl, { time: 1000, quality: 0.6 });
+      if (thumb?.uri) {
+        await FileSystem.copyAsync({ from: thumb.uri, to: targetFile }).catch(() => {});
+        uris.push(targetFile);
+        await FileSystem.deleteAsync(thumb.uri, { idempotent: true }).catch(() => {});
+        return uris;
+      }
+    } catch (e) {
+      console.log('Video thumbnail extraction notice:', e);
+    }
+  }
+
+  return [];
 }
 
 export async function uploadReport(
@@ -335,9 +531,12 @@ export async function uploadReport(
   const generatedId = aiResult?.caseId || `CASE-${Date.now().toString().slice(-6)}`;
   let finalReportId = generatedId;
 
-  // Determine accepted vs rejected based on AI evaluation
+  // When AI confirms a violation, it is auto-accepted directly.
+  // ONLY reports explicitly submitted for human review will have status 'pending_manual_review' / 'under_review'.
   const isAccepted = aiResult ? (aiResult.status === 'fined' && aiResult.violationDetected) : false;
-  const finalStatus = isAccepted ? 'accepted' : 'rejected';
+  const isRateLimited = Boolean(aiResult?.isRateLimited);
+  const dbInsertStatus = isAccepted ? 'accepted' : isRateLimited ? 'under_review' : 'rejected';
+  const localDisplayStatus = dbInsertStatus;
 
   let rewardPkr: number | undefined;
   let penaltyPkr: number | undefined;
@@ -355,8 +554,12 @@ export async function uploadReport(
     } catch (e) {
       console.log('Reward deposit notice:', e);
     }
+  } else if (isRateLimited) {
+    // 2. Rate-limited / Congested AI upstream: NEVER penalize the user!
+    // No penalty fine is charged because the failure was on the AI service provider side.
+    penaltyPkr = undefined;
   } else {
-    // 2. Rejected: AI rejected violation claim -> penalty fine (-PKR 50) for invalid report
+    // 3. Rejected: AI rejected violation claim -> penalty fine (-PKR 50) for invalid report
     penaltyPkr = 50;
     try {
       await deductWalletBalance(50, {
@@ -383,15 +586,22 @@ export async function uploadReport(
     }
   }
 
-  // Cache ONLY confirmed violation frames as local images on disk for evidence inspection in Vault
+  // Cache incident keyframes on local disk for evidence inspection in Vault (for accepted, rejected, and under-review)
+  const framesToSave = (aiResult?.framesBase64 && aiResult.framesBase64.length > 0)
+    ? aiResult.framesBase64
+    : (clip.framesBase64 && clip.framesBase64.length > 0 ? clip.framesBase64 : []);
+
   let frameUris: string[] = [];
-  if (isAccepted && aiResult?.framesBase64 && aiResult.framesBase64.length > 0) {
-    frameUris = await saveFramesToDisk(finalReportId, aiResult.framesBase64);
+  if (framesToSave.length > 0) {
+    frameUris = await saveFramesToDisk(finalReportId, framesToSave);
   }
 
   // Ensure valid UUID for client_capture_id (required by PostgreSQL schema)
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const validCaptureUuid = isUuid.test(clip.clientCaptureId) ? clip.clientCaptureId : Crypto.randomUUID();
+  const validCaptureUuid = UUID_REGEX.test(clip.clientCaptureId) ? clip.clientCaptureId : Crypto.randomUUID();
+
+  if (framesToSave.length > 0 && validCaptureUuid && validCaptureUuid !== finalReportId) {
+    await saveFramesToDisk(validCaptureUuid, framesToSave);
+  }
 
   // 1. Upload Video & Keyframes to Supabase Storage evidence_vault
   let remoteVideoUrl: string | null = null;
@@ -400,7 +610,7 @@ export async function uploadReport(
     const uploadRes = await uploadEvidenceToStorage(
       validCaptureUuid,
       clip.uri,
-      aiResult?.framesBase64 || clip.framesBase64
+      framesToSave
     );
     remoteVideoUrl = uploadRes.videoUrl;
     remoteFrameUrls = uploadRes.frameUrls;
@@ -408,10 +618,33 @@ export async function uploadReport(
     console.warn('Evidence vault storage upload note:', storageErr);
   }
 
-  // 2. Always save in local storage first so user evidence is NEVER lost or blocked
+  // 2. Resolve authenticated user first so localRecord is tagged with the user's ID
+  let userId: string | undefined;
+  let userEmail: string | undefined;
+  let userFullName: string | undefined;
+  try {
+    const { data: sessionData } = await supabase.auth.getUser();
+    userId = sessionData?.user?.id;
+    userEmail = sessionData?.user?.email;
+    userFullName = sessionData?.user?.user_metadata?.full_name;
+    if (!userId) {
+      const cached = await AsyncStorage.getItem('@roadwatch_user_profile');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed.userId && UUID_REGEX.test(parsed.userId)) userId = parsed.userId;
+          if (parsed.email) userEmail = parsed.email;
+          if (parsed.name) userFullName = parsed.name;
+        } catch {}
+      }
+    }
+  } catch {}
+
+  // 3. Always save in user-scoped local storage first so user evidence is NEVER lost or blocked
   const localRecord: StoredCaseReport = {
     reportId: finalReportId,
     clientCaptureId: validCaptureUuid,
+    reporterId: userId,
     claimedClass,
     capturedAt: clip.capturedAt,
     uploadedAt: new Date().toISOString(),
@@ -419,38 +652,27 @@ export async function uploadReport(
     longitude: clip.longitude,
     locationName: clip.locationName,
     accuracy: clip.accuracy,
-    status: finalStatus,
+    status: localDisplayStatus, // local display uses AI result for UX
     aiResult,
     rewardPkr,
     penaltyPkr,
-    frameUris: remoteFrameUrls.length > 0 ? remoteFrameUrls : frameUris,
+    frameUris: frameUris.length > 0 ? frameUris : remoteFrameUrls,
+    videoUri: clip.uri,
+    videoUrl: remoteVideoUrl || undefined,
+    confidenceScore: aiResult?.confidenceScore,
   };
   await saveLocalReport(localRecord);
 
-  // 3. Remote Supabase insertion
+  // 4. Remote Supabase insertion
   try {
-    const { data: session } = await supabase.auth.getUser();
-    let userId = session?.user?.id;
-
-    // If unauthenticated, fallback to a persistent local citizen UUID or device user
-    if (!userId) {
-      const cached = await AsyncStorage.getItem('@roadwatch_user_profile');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (parsed.userId && isUuid.test(parsed.userId)) userId = parsed.userId;
-        } catch {}
-      }
-    }
-
     if (userId) {
       // Ensure base_users exists with role and active status
       try {
         await supabase.from('base_users').upsert({
           user_id: userId,
           role: 'reporter',
-          name: session?.user?.user_metadata?.full_name || 'Citizen Reporter',
-          email: session?.user?.email || 'citizen@roadwatch.org',
+          name: userFullName || 'Citizen Reporter',
+          email: userEmail || 'citizen@roadwatch.org',
           account_state: 'active',
           registration_completed_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
@@ -464,19 +686,31 @@ export async function uploadReport(
         );
       } catch { }
 
-      // Insert Report into public.reports
+      // Insert Report into public.reports as 'submitted' — awaiting officer verdict
+      const effectiveClaimedClass = (claimedClass && claimedClass !== 'auto_ai_detect')
+        ? claimedClass
+        : (aiResult?.violationType || 'unspecified_violation');
+
       const { data: insertedReport, error: insertError } = await supabase
         .from('reports')
         .insert({
           reporter_id: userId,
-          claimed_class: claimedClass === 'auto_ai_detect' ? (aiResult?.violationType || 'red_light_running') : claimedClass,
+          claimed_class: effectiveClaimedClass,
           captured_at: clip.capturedAt || new Date().toISOString(),
           uploaded_at: new Date().toISOString(),
           geo_lat: clip.latitude,
           geo_long: clip.longitude,
           location_accuracy_m: clip.accuracy || 10,
           client_capture_id: validCaptureUuid,
-          status: finalStatus,
+          status: dbInsertStatus,
+          ai_verdict: isAccepted ? 'accepted' : 'rejected',
+          officer_verdict: null, // AI detection only; human officer has not reviewed
+          officer_note: null,
+          ai_confidence: aiResult?.confidenceScore ?? aiResult?.plateConfidence ?? (aiResult?.clarityScore ? Math.round(aiResult.clarityScore) : null),
+          vehicle_plate: aiResult?.plateNumber || null,
+          location_name: clip.locationName || null,
+          video_url: remoteVideoUrl,
+          frame_uris: remoteFrameUrls.length > 0 ? remoteFrameUrls : (frameUris.length > 0 ? frameUris : null),
         })
         .select('report_id')
         .single();
@@ -486,6 +720,10 @@ export async function uploadReport(
         localRecord.reportId = finalReportId;
         if (aiResult) {
           aiResult.caseId = finalReportId;
+        }
+        // Save frames under Supabase insertedReport UUID as well so lookups by Supabase ID succeed
+        if (framesToSave.length > 0) {
+          await saveFramesToDisk(finalReportId, framesToSave);
         }
         await saveLocalReport(localRecord);
 
@@ -499,16 +737,6 @@ export async function uploadReport(
             });
           } catch {}
         }
-
-        // Try updating convenience columns on reports table if migration was applied
-        try {
-          await supabase.from('reports').update({
-            vehicle_plate: aiResult?.plateNumber || 'LEA-4471',
-            location_name: clip.locationName || 'Lahore',
-            video_url: remoteVideoUrl,
-            frame_uris: remoteFrameUrls.length > 0 ? remoteFrameUrls : undefined,
-          }).eq('report_id', finalReportId);
-        } catch {}
       } else if (insertError) {
         console.log('Local vault secured report. Remote DB sync note:', insertError.message);
       }
@@ -534,16 +762,17 @@ export function sanitizeReportForStorage(report: StoredCaseReport): StoredCaseRe
 
 export async function saveLocalReport(report: StoredCaseReport) {
   try {
+    const vaultKey = await getVaultStorageKey();
     const cleanReport = sanitizeReportForStorage(report);
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) {
         list = JSON.parse(raw);
       }
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in vault:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       list = [];
     }
 
@@ -551,42 +780,51 @@ export async function saveLocalReport(report: StoredCaseReport) {
     const sanitizedList = list.slice(0, 50).map(sanitizeReportForStorage);
     const filtered = sanitizedList.filter(r => r.clientCaptureId !== cleanReport.clientCaptureId && r.reportId !== cleanReport.reportId);
     filtered.unshift(cleanReport);
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(filtered));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(filtered));
   } catch (e) {
     console.error('Failed to cache local report:', e);
     // Ultimate recovery fallback: reset corrupted key and save just this clean record
     try {
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY);
-      await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify([sanitizeReportForStorage(report)]));
+      const vaultKey = await getVaultStorageKey();
+      await AsyncStorage.removeItem(vaultKey);
+      await AsyncStorage.setItem(vaultKey, JSON.stringify([sanitizeReportForStorage(report)]));
     } catch { }
   }
 }
 
 export async function getLocalReports(): Promise<StoredCaseReport[]> {
   try {
+    const vaultKey = await getVaultStorageKey();
     let raw: string | null = null;
     try {
-      raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      raw = await AsyncStorage.getItem(vaultKey);
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in getLocalReports:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       return [];
     }
 
     if (!raw) return [];
     const list: StoredCaseReport[] = JSON.parse(raw);
     const deletedIds = new Set(await getDeletedReportIds());
+    const currentUid = await getActiveUserId();
 
     return list
       .filter(r => !deletedIds.has(r.reportId) && !deletedIds.has(r.clientCaptureId))
+      .filter(r => !currentUid || !r.reporterId || r.reporterId === currentUid)
       .map(r => {
-        let normStatus = r.status;
-        if (r.status === 'fined') normStatus = 'accepted';
-        else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity'].includes(r.status)) normStatus = 'rejected';
-        else if (['pending_manual_review', 'under_review', 'disputed'].includes(r.status)) normStatus = 'under_review';
+        const normStatus = resolveCanonicalReportStatus({
+          status: r.status,
+          officerVerdict: r.officerVerdict,
+          aiResult: r.aiResult,
+          penaltyPkr: r.penaltyPkr,
+          rewardPkr: r.rewardPkr,
+        });
         return {
           ...sanitizeReportForStorage(r),
           status: normStatus,
+          rewardPkr: normStatus === 'accepted' ? 200 : undefined,
+          penaltyPkr: normStatus === 'rejected' ? 50 : undefined,
         };
       });
   } catch {
@@ -606,15 +844,16 @@ export async function updateReportStatus(
 ): Promise<void> {
   const normalizedStatus = (status === 'pending_manual_review' || status === 'under_review') ? 'under_review' : status;
   try {
+    const vaultKey = await getVaultStorageKey();
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) {
         list = JSON.parse(raw);
       }
     } catch (cursorErr) {
       console.warn('Recovering from oversized CursorWindow in updateReportStatus:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       list = [];
     }
 
@@ -670,7 +909,7 @@ export async function updateReportStatus(
       return sanitizeReportForStorage(item);
     });
 
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(updated));
 
     // If user paid PKR 100 to dispute, refund the automatic PKR 50 false report penalty
     if (penaltyToRefund > 0) {
@@ -688,7 +927,7 @@ export async function updateReportStatus(
 
   // Safe Supabase update & guarantee presence on Officer Dashboard
   try {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportIdentifier);
+    const isReportUuid = UUID_REGEX.test(reportIdentifier);
     let updated = false;
 
     const updatePayload: Record<string, any> = {
@@ -696,9 +935,12 @@ export async function updateReportStatus(
     };
     if (extra?.citizenDetails?.plateNumber) updatePayload.citizen_plate = extra.citizenDetails.plateNumber;
     if (extra?.citizenDetails?.vehicleMakeModel) updatePayload.citizen_vehicle_model = extra.citizenDetails.vehicleMakeModel;
+    if (extra?.citizenDetails?.vehicleColor) updatePayload.citizen_vehicle_color = extra.citizenDetails.vehicleColor;
+    if (extra?.citizenDetails?.vehicleType) updatePayload.citizen_vehicle_type = extra.citizenDetails.vehicleType;
     if (extra?.citizenDetails?.citizenNote) updatePayload.citizen_note = extra.citizenDetails.citizenNote;
+    if (extra?.citizenDetails?.violationType) updatePayload.claimed_class = extra.citizenDetails.violationType;
 
-    if (isUuid) {
+    if (isReportUuid) {
       const { data } = await supabase.from('reports').update(updatePayload).eq('report_id', reportIdentifier).select('report_id');
       if (data && data.length > 0) updated = true;
     }
@@ -716,24 +958,41 @@ export async function updateReportStatus(
         if (cached) {
           try {
             const p = JSON.parse(cached);
-            if (p.userId && isUuid.test(p.userId)) userId = p.userId;
+            if (p.userId && UUID_REGEX.test(p.userId)) userId = p.userId;
           } catch {}
         }
       }
 
       if (userId) {
-        const captureUuid = (clientCaptureId && isUuid.test(clientCaptureId)) ? clientCaptureId : Crypto.randomUUID();
-        await supabase.from('reports').insert({
-          reporter_id: userId,
-          claimed_class: extra?.citizenDetails?.violationType || 'red_light_running',
-          status: normalizedStatus,
-          client_capture_id: captureUuid,
-          captured_at: new Date().toISOString(),
-          uploaded_at: new Date().toISOString(),
-          geo_lat: 31.5204,
-          geo_long: 74.3587,
-          location_accuracy_m: 10,
-        }).catch(() => {});
+        const captureUuid = (clientCaptureId && UUID_REGEX.test(clientCaptureId)) ? clientCaptureId : Crypto.randomUUID();
+        // Insert as 'submitted' first (satisfies CHECK constraint), then update to desired status
+        let newRow: { report_id: string } | null = null;
+        try {
+          const res = await supabase.from('reports').insert({
+            reporter_id: userId,
+            claimed_class: extra?.citizenDetails?.violationType || 'unspecified_violation',
+            status: 'submitted',
+            client_capture_id: captureUuid,
+            captured_at: new Date().toISOString(),
+            uploaded_at: new Date().toISOString(),
+            geo_lat: 31.5204,
+            geo_long: 74.3587,
+            location_accuracy_m: 10,
+            citizen_note: extra?.citizenDetails?.citizenNote || undefined,
+            citizen_plate: extra?.citizenDetails?.plateNumber || undefined,
+            citizen_vehicle_model: extra?.citizenDetails?.vehicleMakeModel || undefined,
+          }).select('report_id').single();
+          newRow = res.data;
+        } catch {}
+
+        // If status differs from 'submitted', update it now
+        if (newRow?.report_id && normalizedStatus !== 'submitted') {
+          try {
+            await supabase.from('reports')
+              .update({ status: normalizedStatus })
+              .eq('report_id', newRow.report_id);
+          } catch {}
+        }
       }
     }
   } catch (e) {
@@ -751,9 +1010,10 @@ export async function updateReportCitizenDetails(
   clientCaptureId?: string
 ): Promise<void> {
   try {
+    const vaultKey = await getVaultStorageKey();
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) list = JSON.parse(raw);
     } catch (e) {
       console.warn('Failed reading local vault in updateReportCitizenDetails:', e);
@@ -796,7 +1056,54 @@ export async function updateReportCitizenDetails(
       return sanitizeReportForStorage(item);
     });
 
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(updated));
+
+    // 2. Synchronize citizen manual details to Supabase reports table for Officer Dashboard
+    try {
+      const updatePayload: Record<string, any> = {};
+      if (details.plateNumber !== undefined && details.plateNumber.trim()) {
+        updatePayload.citizen_plate = details.plateNumber.trim();
+        updatePayload.vehicle_plate = details.plateNumber.trim();
+      }
+      if (details.vehicleMakeModel !== undefined && details.vehicleMakeModel.trim()) {
+        updatePayload.citizen_vehicle_model = details.vehicleMakeModel.trim();
+      }
+      if (details.vehicleColor !== undefined && details.vehicleColor.trim()) {
+        updatePayload.citizen_vehicle_color = details.vehicleColor.trim();
+      }
+      if (details.vehicleType !== undefined && details.vehicleType) {
+        updatePayload.citizen_vehicle_type = details.vehicleType;
+      }
+      if (details.citizenNote !== undefined && details.citizenNote.trim()) {
+        updatePayload.citizen_note = details.citizenNote.trim();
+      }
+      if (details.violationType && details.violationType !== 'auto_ai_detect' && details.violationType !== 'unspecified_violation') {
+        updatePayload.claimed_class = details.violationType;
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        const isReportUuid = UUID_REGEX.test(reportIdentifier);
+        let updatedRemote = false;
+
+        if (isReportUuid) {
+          const { data, error } = await supabase
+            .from('reports')
+            .update(updatePayload)
+            .eq('report_id', reportIdentifier)
+            .select('report_id');
+          if (!error && data && data.length > 0) updatedRemote = true;
+        }
+
+        if (!updatedRemote && clientCaptureId) {
+          await supabase
+            .from('reports')
+            .update(updatePayload)
+            .eq('client_capture_id', clientCaptureId);
+        }
+      }
+    } catch (syncErr) {
+      console.warn('Failed to sync citizen details to Supabase:', syncErr);
+    }
   } catch (err) {
     console.error('Failed to save citizen details to local vault:', err);
   }
@@ -813,13 +1120,14 @@ export async function resolveHumanReview(
 ): Promise<{ success: boolean; newStatus: string; payoutPkr: number }> {
   let payoutPkr = 0;
   try {
+    const vaultKey = await getVaultStorageKey();
     let list: StoredCaseReport[] = [];
     try {
-      const raw = await AsyncStorage.getItem(LOCAL_VAULT_KEY);
+      const raw = await AsyncStorage.getItem(vaultKey);
       if (raw) list = JSON.parse(raw);
     } catch (cursorErr) {
       console.warn('Recovering from CursorWindow in resolveHumanReview:', cursorErr);
-      await AsyncStorage.removeItem(LOCAL_VAULT_KEY).catch(() => { });
+      await AsyncStorage.removeItem(vaultKey).catch(() => { });
       return { success: false, newStatus: 'unknown', payoutPkr: 0 };
     }
 
@@ -867,7 +1175,7 @@ export async function resolveHumanReview(
       return sanitizeReportForStorage(item);
     });
 
-    await AsyncStorage.setItem(LOCAL_VAULT_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(vaultKey, JSON.stringify(updated));
 
     // Supabase update
     try {
@@ -880,6 +1188,132 @@ export async function resolveHumanReview(
   } catch (err) {
     console.error('Error resolving human review:', err);
     return { success: false, newStatus: 'error', payoutPkr: 0 };
+  }
+}
+
+/**
+ * Purges local report vault cache (both legacy un-scoped and user-scoped keys)
+ */
+export async function clearReportsCache(userId?: string): Promise<void> {
+  try {
+    const uid = userId || (await getActiveUserId());
+    const keys = [
+      '@roadwatch_local_vault_reports',
+      '@roadwatch_reporter_citations',
+      '@roadwatch_deleted_report_ids',
+    ];
+    if (uid) {
+      keys.push(`@roadwatch_local_vault_reports_${uid}`);
+      keys.push(`@roadwatch_reporter_citations_${uid}`);
+      keys.push(`@roadwatch_deleted_report_ids_${uid}`);
+    }
+    await AsyncStorage.multiRemove(keys);
+  } catch {}
+}
+
+/**
+ * Returns consolidated reporter stats (approved, rejected, underReview, total, trustScore)
+ * matching the exact deduplicated, deleted-filtered, and canonical status logic of Evidence Vault.
+ */
+export async function getConsolidatedReporterStats(userId?: string): Promise<{
+  approved: number;
+  rejected: number;
+  underReview: number;
+  total: number;
+  trustScore: number;
+}> {
+  try {
+    const deletedIds = new Set(await getDeletedReportIds());
+    const localList = await getLocalReports();
+    const filteredLocal = localList.filter(
+      item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId) && (!userId || !item.reporterId || item.reporterId === userId)
+    );
+
+    let remoteList: any[] = [];
+    if (userId) {
+      const { data, error } = await supabase
+        .from('reports')
+        .select('report_id,client_capture_id,status,officer_verdict,ai_verdict')
+        .eq('reporter_id', userId)
+        .limit(200);
+      if (!error && data) {
+        remoteList = data;
+      }
+    }
+
+    const seen = new Set<string>();
+    let approved = 0;
+    let rejected = 0;
+    let underReview = 0;
+
+    for (const l of filteredLocal) {
+      seen.add(l.reportId);
+      if (l.clientCaptureId) seen.add(l.clientCaptureId);
+      const remoteMatch = remoteList.find(r =>
+        r.report_id === l.reportId || (r.client_capture_id && (r.client_capture_id === l.clientCaptureId || r.client_capture_id === l.reportId))
+      );
+
+      const status = resolveCanonicalReportStatus({
+        status: remoteMatch ? remoteMatch.status : l.status,
+        officerVerdict: remoteMatch?.officer_verdict || l.officerVerdict,
+        officer_verdict: remoteMatch?.officer_verdict,
+        ai_verdict: remoteMatch?.ai_verdict,
+        aiResult: l.aiResult,
+        penaltyPkr: l.penaltyPkr,
+        rewardPkr: l.rewardPkr,
+      });
+
+      if (status === 'accepted') approved++;
+      else if (status === 'rejected') rejected++;
+      else underReview++;
+    }
+
+    for (const r of remoteList) {
+      if (deletedIds.has(r.report_id) || (r.client_capture_id && deletedIds.has(r.client_capture_id))) continue;
+      const alreadyInLocal = seen.has(r.report_id) || (r.client_capture_id && seen.has(r.client_capture_id));
+      if (!alreadyInLocal) {
+        seen.add(r.report_id);
+        if (r.client_capture_id) seen.add(r.client_capture_id);
+        const status = resolveCanonicalReportStatus({
+          status: r.status,
+          officer_verdict: r.officer_verdict,
+          ai_verdict: r.ai_verdict,
+        });
+        if (status === 'accepted') approved++;
+        else if (status === 'rejected') rejected++;
+        else underReview++;
+      }
+    }
+
+    // 3. Reconcile with citations so clearing video cards from the vault screen
+    // preserves the citizen's authentic lifetime penalty history
+    try {
+      const citations = await getPenaltyCitations();
+      for (const c of citations) {
+        const cKey = c.reportId || c.citationId;
+        if (cKey && !seen.has(cKey)) {
+          seen.add(cKey);
+          rejected++;
+        }
+      }
+    } catch {}
+
+    const totalResolved = approved + rejected;
+    let trustScore = 100;
+    if (totalResolved > 0) {
+      trustScore = Math.max(0, Math.min(100, Math.round((approved / totalResolved) * 100)));
+    }
+
+    return {
+      approved,
+      rejected,
+      underReview,
+      total: approved + rejected + underReview,
+      trustScore,
+    };
+  } catch (err) {
+    console.warn('Error calculating consolidated stats:', err);
+    return { approved: 0, rejected: 0, underReview: 0, total: 0, trustScore: 100 };
   }
 }
 

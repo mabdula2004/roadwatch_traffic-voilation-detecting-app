@@ -24,6 +24,7 @@ export interface AiEvidentiaryResult {
   plateStatus: PlateStatus;
   plateNumber: string | null;
   plateConfidence: number; // 0 - 100
+  confidenceScore: number; // 0 - 100 overall AI certainty in detection and vehicle
   clarityScore: number; // 0 - 100
   rejectionReason: RejectionReason;
   vehicleMakeModel: string;
@@ -51,7 +52,8 @@ export interface AiEvidentiaryResult {
   isCitizenEdited?: boolean;
 }
 
-const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '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';
+const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY || '';
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const AI_MODEL = process.env.EXPO_PUBLIC_AI_MODEL || 'qwen/qwen3-vl-8b-instruct';
 
 const COMPACT_VIOLATION_TAXONOMY =
@@ -206,6 +208,7 @@ export async function analyzeTrafficViolation(params: {
       plateStatus: 'blurred',
       plateNumber: null,
       plateConfidence: 0,
+      confidenceScore: 0,
       clarityScore: 0,
       rejectionReason: 'low_clarity',
       vehicleMakeModel: 'Not Captured',
@@ -248,6 +251,32 @@ async function callOpenRouterVision(
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        // Upstream shared pool rate limit/congestion: wait 2.5s and retry once automatically
+        await new Promise(r => setTimeout(r, 2500));
+        const retryRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'HTTP-Referer': 'https://roadwatch.app',
+            'X-OpenRouter-Title': 'RoadWatch Traffic AI',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: AI_MODEL,
+            messages: [{ role: 'user', content }],
+            temperature: 0.1,
+            max_tokens: maxTokens,
+          }),
+        });
+        if (retryRes.ok) {
+          const data = await retryRes.json();
+          const rawContent = data.choices?.[0]?.message?.content || '';
+          const cleaned = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
+          const parsed = JSON.parse(cleaned);
+          return { ok: true, parsed };
+        }
+      }
       const errText = await response.text();
       return { ok: false, is402: response.status === 402, error: `HTTP ${response.status}: ${errText}` };
     }
@@ -262,6 +291,106 @@ async function callOpenRouterVision(
   }
 }
 
+/**
+ * Executes a high-speed, high-accuracy vision analysis call using native Google Gemini API
+ */
+async function callGeminiVision(
+  prompt: string,
+  framesBase64: string[],
+  maxTokens: number = 600
+): Promise<{ ok: boolean; parsed?: any; error?: string }> {
+  try {
+    const key = GEMINI_API_KEY;
+    if (!key) return { ok: false, error: 'No Gemini API key configured' };
+
+    const parts: any[] = [{ text: prompt }];
+    for (const b64 of framesBase64) {
+      const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: cleanB64,
+        },
+      });
+    }
+
+    const models = [
+      'gemini-flash-lite-latest',
+      'gemini-flash-latest',
+      'gemini-3.8-flash',
+      'gemini-3.5-flash',
+      'gemini-3.1-flash-lite',
+    ];
+    let lastError = '';
+
+    for (const m of models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${key}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.1,
+              maxOutputTokens: maxTokens,
+            },
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (raw) {
+            const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleaned);
+            return { ok: true, parsed };
+          }
+        } else {
+          const errText = await res.text();
+          lastError = `HTTP ${res.status}: ${errText.slice(0, 100)}`;
+          if (res.status === 503 || res.status === 429) continue;
+        }
+      } catch (err: any) {
+        lastError = err?.message || String(err);
+      }
+    }
+
+    return { ok: false, error: lastError };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Unified Vision AI caller: executes Google Gemini first, falls back to OpenRouter
+ */
+async function callVisionAI(
+  prompt: string,
+  framesBase64: string[],
+  maxTokens: number = 500
+): Promise<{ ok: boolean; parsed?: any; is402?: boolean; error?: string }> {
+  // 1. Prioritize Google Gemini (zero 429 congestion, sub-second latency)
+  if (GEMINI_API_KEY) {
+    const geminiRes = await callGeminiVision(prompt, framesBase64, maxTokens);
+    if (geminiRes.ok && geminiRes.parsed) {
+      return geminiRes;
+    }
+    console.warn('Gemini vision notice, falling back to OpenRouter:', geminiRes.error);
+  }
+
+  // 2. Fallback to OpenRouter (Qwen)
+  const openRouterContent: any[] = [{ type: 'text', text: prompt }];
+  for (const f of framesBase64) {
+    openRouterContent.push({
+      type: 'image_url',
+      image_url: { url: f.startsWith('data:') ? f : `data:image/jpeg;base64,${f}` },
+    });
+  }
+  return callOpenRouterVision(openRouterContent, maxTokens);
+}
+
   const cropNote = params.cropZoom && params.cropZoom > 1
     ? `\nNote: Framing zoom applied by citizen (${params.cropLabel || 'Focused'}, ${params.cropZoom}x magnification). Focus directly on target vehicle and violation in central frame.`
     : '';
@@ -273,8 +402,8 @@ async function callOpenRouterVision(
   const focalIndex = frames.length > 1 ? 1 : 0;
   const primaryFrame = frames[focalIndex];
 
-  const stage1Prompt = `You are RoadWatch AI (Qwen3-VL 8B) traffic enforcement auditor.
-Review the provided central video keyframe extracted from a citizen's clip.${cropNote}
+  const stage1Prompt = `You are RoadWatch AI traffic enforcement vision auditor.
+Review the provided central video keyframe extracted from a citizen's clip in Pakistan.${cropNote}
 
 RECOGNIZED VIOLATIONS:
 ${COMPACT_VIOLATION_TAXONOMY}
@@ -285,12 +414,27 @@ PRIMARY EVIDENTIARY RULES:
    - "violation_detected": false
    - "rejection_reason": "no_violation"
    - "plate_number": null
+   - "confidence_score": 10
 
 2. ACTIONABLE VIOLATION:
    If a vehicle commits an actionable traffic violation:
    - "violation_detected": true
    - "violation_type": "<code_from_taxonomy>"
-   - "plate_number": exact sharp plate if 100% distinct, otherwise null with plate_status: "blurred". NEVER guess.
+
+3. STRICT VEHICLE & ATTRIBUTION RULES (Pakistani Traffic):
+   - You MUST identify the EXACT violating vehicle committing the infraction, NOT random background cars!
+   - "vehicle_type": Select the exact category: "Car" | "Motorcycle" | "Auto Rickshaw" | "Qingqi" | "Van / Bolan" | "Pickup" | "Truck" | "Bus" | "Tractor".
+   - "vehicle_color": State the primary body paint color clearly (e.g. "White", "Silver", "Black", "Grey", "Red", "Blue", "Yellow", "Green", "Maroon").
+   - "vehicle_make_model": Identify the specific make and model carefully:
+     - Common cars: Suzuki (Alto, Mehran, Cultus, Wagon R, Swift), Toyota (Corolla, Yaris, Fortuner, Prius), Honda (Civic, City), Kia (Sportage, Picanto), Hyundai (Tucson, Elantra), Changan (Alsvin), MG (HS, ZS).
+     - Common motorbikes: Honda CD 70, Honda CG 125, Yamaha YBR, Suzuki 110, Electric Scooter.
+     - If exact model is partly ambiguous, specify brand and body (e.g. "Suzuki Hatchback", "Toyota Sedan", "70cc Motorcycle") rather than wild guesses.
+   - "plate_number": Look closely at the vehicle's registration plate (Pakistani plates typically: 2-3 capital letters + 3-4 digits, e.g. "LEA-1234", "LED-3776", "ICT-512", "KHI-992"). If sharp and legible, provide it. If blurry or unreadable, set to null and "plate_status": "blurred".
+   - "plate_confidence": Genuine confidence in plate reading (0 to 100). If blurred/uncertain, state an honest low score (e.g. 20-50).
+   - "confidence_score": Overall confidence in your vehicle identification and violation detection (0 to 100):
+     - 80-100: Very high confidence (crisp footage, obvious vehicle & plate)
+     - 50-79: Moderate confidence (vehicle identified, but details somewhat blurry or challenging)
+     - Below 50: Low confidence (recommend manual verification by citizen/warden).
 
 Output ONLY valid JSON:
 {
@@ -300,6 +444,7 @@ Output ONLY valid JSON:
   "plate_status": "clear" | "blurred" | "missing",
   "plate_number": string or null,
   "plate_confidence": number,
+  "confidence_score": number,
   "clarity_score": number,
   "vehicle_make_model": string,
   "vehicle_color": string,
@@ -314,12 +459,12 @@ Output ONLY valid JSON:
   ];
 
   let isCreditLimitError = false;
-  let stage1Result = await callOpenRouterVision(stage1Content);
+  let stage1Result = await callVisionAI(stage1Prompt, [primaryFrame]);
 
   // Quick retry once if network glitch
   if (!stage1Result.ok && !stage1Result.is402) {
     await new Promise(r => setTimeout(r, 800));
-    stage1Result = await callOpenRouterVision(stage1Content);
+    stage1Result = await callVisionAI(stage1Prompt, [primaryFrame]);
   }
 
   if (stage1Result.is402) {
@@ -332,7 +477,7 @@ Output ONLY valid JSON:
 
     // --- SMART EARLY EXIT ---
     // If NO violation in this central frame (laptop screen, room, or lawful compliant traffic):
-    // STOP IMMEDIATELY! Do NOT send any more frames or waste any more tokens.
+    // Stop analysis but KEEP the extracted frames for Evidence Vault inspection or user dispute!
     if (!isVioSuspected) {
       return formatResult(
         caseId,
@@ -343,7 +488,7 @@ Output ONLY valid JSON:
         },
         params.claimedClass,
         locationName,
-        []
+        frames
       );
     }
 
@@ -368,29 +513,41 @@ Output ONLY valid JSON:
     let finalPlateNumber = s1.plate_number;
     let finalPlateStatus = s1.plate_status;
     let finalReasoning = s1.reasoning;
+    let finalMakeModel = s1.vehicle_make_model;
+    let finalColor = s1.vehicle_color;
+    let finalConfidence = s1.confidence_score;
 
     // If plate was blurred or not yet distinct, inspect exit tracking frame (80% duration) for clear plate:
     if ((s1.plate_status !== 'clear' || !s1.plate_number) && frames.length > 2) {
       const exitFrame = frames[2];
-      const platePrompt = `You are RoadWatch AI plate inspection specialist.
+      const platePrompt = `You are RoadWatch AI plate and vehicle identification specialist.
 Review this close-up exit frame for the violating vehicle (${s1.vehicle_color || ''} ${s1.vehicle_type || 'vehicle'}).
-Can you clearly read the vehicle license plate?
+Can you clearly read the vehicle license plate or identify more precise make, model, or color?
 Output ONLY JSON:
 {
   "plate_status": "clear" | "blurred" | "missing",
   "plate_number": string or null,
   "plate_confidence": number,
+  "confidence_score": number,
+  "vehicle_make_model": string or null,
+  "vehicle_color": string or null,
   "confirms_violation": boolean
 }`;
-      const stage2Result = await callOpenRouterVision([
-        { type: 'text', text: platePrompt },
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${exitFrame}` } },
-      ]);
+      const stage2Result = await callVisionAI(platePrompt, [exitFrame]);
 
       if (stage2Result.ok && stage2Result.parsed) {
         if (stage2Result.parsed.plate_number && stage2Result.parsed.plate_status === 'clear') {
           finalPlateNumber = stage2Result.parsed.plate_number;
           finalPlateStatus = 'clear';
+        }
+        if (stage2Result.parsed.vehicle_make_model && (!finalMakeModel || finalMakeModel === 'Not Identified')) {
+          finalMakeModel = stage2Result.parsed.vehicle_make_model;
+        }
+        if (stage2Result.parsed.vehicle_color && (!finalColor || finalColor === 'Unknown')) {
+          finalColor = stage2Result.parsed.vehicle_color;
+        }
+        if (stage2Result.parsed.confidence_score !== undefined) {
+          finalConfidence = Math.max(Number(finalConfidence || 0), Number(stage2Result.parsed.confidence_score));
         }
         if (stage2Result.parsed.confirms_violation) {
           confirmedIndices.push(3);
@@ -404,6 +561,9 @@ Output ONLY JSON:
         ...s1,
         plate_number: finalPlateNumber,
         plate_status: finalPlateStatus,
+        vehicle_make_model: finalMakeModel,
+        vehicle_color: finalColor,
+        confidence_score: finalConfidence,
         confirmed_frame_indices: confirmedIndices,
         reasoning: finalReasoning,
       },
@@ -423,6 +583,7 @@ Output ONLY JSON:
     plateStatus: 'blurred',
     plateNumber: null,
     plateConfidence: 0,
+    confidenceScore: 0,
     clarityScore: 0,
     rejectionReason: 'none',
     vehicleMakeModel: 'Not Detected',
@@ -580,9 +741,18 @@ function formatResult(
   const detectedViolationCode = status === 'fined' ? violationType : null;
   const violationMeta = getViolationMeta(detectedViolationCode);
   const fineAmountPkr = status === 'fined' && detectedViolationCode ? (FINE_SCHEDULE[detectedViolationCode] || 2000) : 0;
-  const plateConfidence = status === 'fined' && detectedPlate
-    ? Math.max(85, Math.round(Number(parsed.plate_confidence ?? 0.95) * 100))
-    : 0;
+  
+  // Honest plate confidence (0 - 100) without artificial clamping
+  const plateConfidence = detectedPlate && parsed.plate_confidence !== undefined
+    ? Math.min(100, Math.max(10, Math.round(Number(parsed.plate_confidence) * (Number(parsed.plate_confidence) <= 1 ? 100 : 1))))
+    : (detectedPlate ? 75 : 0);
+
+  // Overall AI detection certainty score (0 - 100)
+  const rawConfidence = Number(parsed.confidence_score ?? parsed.confidence ?? (status === 'fined' ? 82 : 45));
+  let confidenceScore = Math.min(100, Math.max(15, Math.round(rawConfidence > 1 ? rawConfidence : rawConfidence * 100)));
+  if (status === 'fined' && plateStatus === 'blurred') {
+    confidenceScore = Math.min(confidenceScore, 65);
+  }
 
   // Frame sequence attribution: Determine the decisive violation frame (defaults to Frame 2)
   const violationFrameIndex = Number(parsed.violation_frame_index) >= 1 && Number(parsed.violation_frame_index) <= 3
@@ -590,11 +760,7 @@ function formatResult(
     : (status === 'fined' ? 2 : 1);
 
   // Proving evidentiary frame(s):
-  // Preserve and display ONLY the frames in which violation is confirmly detected!
-  // - 0 confirmed frames (or laptop / room / no violation) -> 0 frames!
-  // - 1 frame confirms violation -> 1 frame!
-  // - 2 frames confirm violation -> 2 frames!
-  // - 3 frames confirm violation -> 3 frames!
+  // Preserve and display ALL candidate keyframes so Vault preview and dossier never show empty/black placeholders!
   const safeFrames = framesBase64 || [];
   const decisiveFrames: string[] = [];
   const frameDescriptions: string[] = [];
@@ -612,7 +778,6 @@ function formatResult(
       }
     }
 
-    // Fallback if violation confirmed but model didn't specify indices: default to 1 focal frame (Frame 2 or Frame 1)
     if (confirmedIndices.length === 0 && safeFrames.length > 0) {
       confirmedIndices = [safeFrames.length > 1 ? 2 : 1];
     }
@@ -624,13 +789,26 @@ function formatResult(
       }
     }
 
-    if (Array.isArray(parsed.frame_descriptions) && parsed.frame_descriptions.length === decisiveFrames.length) {
+    // Always preserve remaining safeFrames so 3-frame preview strip on Vault card and dossier are fully populated!
+    for (const f of safeFrames) {
+      if (!decisiveFrames.includes(f)) {
+        decisiveFrames.push(f);
+      }
+    }
+
+    if (Array.isArray(parsed.frame_descriptions) && parsed.frame_descriptions.length >= decisiveFrames.length) {
       frameDescriptions.push(...parsed.frame_descriptions.map(String));
     } else {
       decisiveFrames.forEach((_, i) => {
-        frameDescriptions.push(`Frame ${i + 1}: ⚡ VIOLATION CONFIRMED - ${violationMeta?.name || 'Evidence Keyframe'}`);
+        frameDescriptions.push(`Frame ${i + 1}: ⚡ VIOLATION MOMENT - ${violationMeta?.name || 'Evidence Keyframe'}`);
       });
     }
+  } else {
+    // Keep all extracted frames for evidence vault inspection, human dispute, and warden review!
+    decisiveFrames.push(...safeFrames);
+    safeFrames.forEach((_, i) => {
+      frameDescriptions.push(`Frame ${i + 1}: Evidence Video Keyframe`);
+    });
   }
 
   return {
@@ -642,6 +820,7 @@ function formatResult(
     plateStatus: status === 'fined' ? 'clear' : plateStatus,
     plateNumber: status === 'fined' ? detectedPlate : null,
     plateConfidence,
+    confidenceScore,
     clarityScore,
     rejectionReason,
     vehicleMakeModel,

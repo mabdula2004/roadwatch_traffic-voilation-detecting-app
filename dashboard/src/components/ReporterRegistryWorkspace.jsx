@@ -35,10 +35,11 @@ export function ReporterRegistryWorkspace() {
 
       const merged = (users || []).map((u) => {
         const prof = profileMap.get(u.user_id);
+        const rawPlate = prof?.vehicle_plate;
         return {
           ...u,
           trust_score: prof?.trust_score ?? 100,
-          vehicle_plate: prof?.vehicle_plate ?? 'LEA-4471',
+          vehicle_plate: rawPlate && rawPlate !== 'LEA-4471' ? rawPlate : null,
         };
       });
 
@@ -96,8 +97,8 @@ export function ReporterRegistryWorkspace() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-muted">{r.email || 'N/A'}</td>
-                  <td className="px-4 py-3 font-display font-bold text-telemetry">
-                    {r.vehicle_plate || 'LEA-4471'}
+                  <td className={`px-4 py-3 font-display font-bold ${r.vehicle_plate ? 'text-telemetry' : 'text-muted'}`}>
+                    {r.vehicle_plate || 'Not Registered'}
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={r.account_state === 'active' ? 'valid' : 'accent'}>

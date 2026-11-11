@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Image,
   Dimensions,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -25,6 +26,8 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Maximize2,
   MapPin,
   Clock,
@@ -50,6 +53,8 @@ import {
   getReportFrames,
   deleteReports,
   getDeletedReportIds,
+  saveLocalReport,
+  resolveCanonicalReportStatus,
 } from '../../lib/report';
 import { AiEvidentiaryResult } from '../../lib/aiAnalysis';
 
@@ -96,19 +101,78 @@ type ReportRow = {
   citizen_violation_name?: string;
   citizen_note?: string;
   is_citizen_edited?: boolean;
+  video_url?: string;
+  confidence_score?: number;
 };
+
+export type VaultCategory = 'all' | 'accepted' | 'under_review' | 'rejected';
+const INITIAL_DISPLAY_COUNT = 5;
+
+function EvidenceImage({
+  uri,
+  style,
+  resizeMode = 'cover',
+  isViolationMoment = false,
+}: {
+  uri: string;
+  style: any;
+  resizeMode?: 'cover' | 'contain';
+  isViolationMoment?: boolean;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError || !uri) {
+    return (
+      <View
+        style={[
+          style,
+          {
+            backgroundColor: 'rgba(30, 41, 59, 0.7)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 4,
+          },
+        ]}
+      >
+        <ShieldAlert size={16} color={isViolationMoment ? '#ef4444' : '#64748b'} />
+        <Text
+          style={{
+            fontSize: 8,
+            color: '#94a3b8',
+            marginTop: 2,
+            fontWeight: '700',
+            textAlign: 'center',
+          }}
+        >
+          {isViolationMoment ? 'VIOLATION' : 'KEYFRAME'}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => setHasError(true)}
+    />
+  );
+}
 
 export function Vault() {
   const { colors } = useTheme();
   const { t, isUrdu } = useLanguage();
   const [activeTab, setActiveTab] = useState<'pending' | 'sealed'>('sealed');
+  const [categoryFilter, setCategoryFilter] = useState<VaultCategory>('all');
+  const [showAllReports, setShowAllReports] = useState<boolean>(false);
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loadError, setLoadError] = useState('');
 
   // Evidentiary Detail Dossier & Full-Screen Zoom Lightbox States
   const [selectedReport, setSelectedReport] = useState<ReportRow | null>(null);
   const [zoomFrameIndex, setZoomFrameIndex] = useState<number | null>(null);
-  const vaultLightboxScrollRef = useRef<ScrollView>(null);
+  const vaultLightboxScrollRef = useRef<any>(null);
 
   useEffect(() => {
     if (zoomFrameIndex !== null) {
@@ -128,31 +192,44 @@ export function Vault() {
 
   const loadReports = useCallback(async () => {
     try {
+      const { data: auth } = await supabase.auth.getUser();
+      const currentUserId = auth?.user?.id;
+
       const deletedIds = new Set(await getDeletedReportIds());
       const localList = await getLocalReports();
       const filteredLocalList = localList.filter(
-        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId)
+        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId) && (!currentUserId || !item.reporterId || item.reporterId === currentUserId)
       );
 
       const formattedLocal: ReportRow[] = await Promise.all(
         filteredLocalList.map(async (item) => {
-          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris);
+          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris, item.videoUri || item.videoUrl);
+          const normStatus = resolveCanonicalReportStatus({
+            status: item.status,
+            officerVerdict: item.officerVerdict,
+            aiResult: item.aiResult,
+            penaltyPkr: item.penaltyPkr,
+            rewardPkr: item.rewardPkr,
+          });
+
           return {
             report_id: item.reportId,
             claimed_class: item.claimedClass,
             captured_at: item.capturedAt,
-            status: item.status,
+            status: normStatus,
             geo_lat: item.latitude,
             geo_long: item.longitude,
             location_name: item.locationName,
-            reward_pkr: item.rewardPkr,
-            penalty_pkr: item.penaltyPkr,
+            reward_pkr: normStatus === 'accepted' ? 200 : undefined,
+            penalty_pkr: normStatus === 'rejected' ? 50 : undefined,
             plate_number: item.aiResult?.plateNumber || undefined,
             officer_verdict: item.officerVerdict,
             review_fee_refunded: item.reviewFeeRefunded,
             total_payout_pkr: item.totalPayoutPkr,
             officer_note: item.officerNote,
             frame_uris: frames.length > 0 ? frames : undefined,
+            video_url: item.videoUrl || item.videoUri,
+            confidence_score: item.confidenceScore || item.aiResult?.confidenceScore,
             ai_result: item.aiResult,
             vehicle_model: item.aiResult?.vehicleMakeModel,
             vehicle_color: item.aiResult?.vehicleColor,
@@ -169,27 +246,107 @@ export function Vault() {
         })
       );
 
-      const { data, error } = await supabase
-        .from('reports')
-        .select('report_id,claimed_class,captured_at,status,geo_lat,geo_long,client_capture_id')
-        .order('captured_at', { ascending: false })
-        .limit(100);
+      let remoteList: any[] = [];
+      if (currentUserId) {
+        const { data, error } = await supabase
+          .from('reports')
+          .select('report_id,claimed_class,captured_at,status,geo_lat,geo_long,client_capture_id,location_name,vehicle_plate,video_url,frame_uris,citizen_note,citizen_plate,citizen_vehicle_model,citizen_vehicle_color,citizen_vehicle_type,officer_verdict,officer_note,officer_verdict_at,ai_verdict,ai_confidence')
+          .eq('reporter_id', currentUserId)
+          .order('captured_at', { ascending: false })
+          .limit(100);
 
-      const remoteList = (!error && data) ? data : [];
+        if (!error && data) {
+          remoteList = data;
+        }
+      }
+
       const seen = new Set<string>();
       const combined: ReportRow[] = [];
 
-      // Prioritize local rich records
+      // Prioritize local rich records, and synchronize any remote officer verdicts or status updates
       for (const l of formattedLocal) {
         seen.add(l.report_id);
         const matchItem = filteredLocalList.find(x => x.reportId === l.report_id);
         if (matchItem?.clientCaptureId) {
           seen.add(matchItem.clientCaptureId);
         }
+
+        const remoteMatch = remoteList.find(r =>
+          r.report_id === l.report_id ||
+          (r.client_capture_id && (r.client_capture_id === l.client_capture_id || (matchItem && r.client_capture_id === matchItem.clientCaptureId)))
+        );
+
+        if (remoteMatch) {
+          const normStatus = resolveCanonicalReportStatus({
+            status: remoteMatch.status,
+            officer_verdict: remoteMatch.officer_verdict,
+            ai_verdict: remoteMatch.ai_verdict,
+            aiResult: l.ai_result,
+            penaltyPkr: l.penalty_pkr,
+            rewardPkr: l.reward_pkr,
+          });
+
+          if (remoteMatch.officer_verdict) l.officer_verdict = remoteMatch.officer_verdict;
+          if (remoteMatch.officer_note) l.officer_note = remoteMatch.officer_note;
+          if (remoteMatch.vehicle_plate && !l.plate_number) l.plate_number = remoteMatch.vehicle_plate;
+          if (remoteMatch.location_name && !l.location_name) l.location_name = remoteMatch.location_name;
+          if (remoteMatch.video_url && !l.video_url) l.video_url = remoteMatch.video_url;
+
+          // Crucial: recover frames if local had no frames or lost them!
+          if ((!l.frame_uris || l.frame_uris.length === 0) && remoteMatch.frame_uris && remoteMatch.frame_uris.length > 0) {
+            l.frame_uris = remoteMatch.frame_uris;
+          }
+          if ((!l.frame_uris || l.frame_uris.length === 0) && remoteMatch.video_url) {
+            const recovered = await getReportFrames(l.report_id, l.client_capture_id, undefined, remoteMatch.video_url);
+            if (recovered.length > 0) {
+              l.frame_uris = recovered;
+            }
+          }
+
+          l.status = normStatus;
+          if (normStatus === 'accepted') {
+            l.reward_pkr = 200;
+            l.penalty_pkr = undefined;
+          } else if (normStatus === 'rejected') {
+            l.penalty_pkr = 50;
+            l.reward_pkr = undefined;
+          }
+
+          // Persist update to AsyncStorage so local cache is never stale
+          if (matchItem && (remoteMatch.officer_verdict !== matchItem.officerVerdict || normStatus !== matchItem.status)) {
+            void saveLocalReport({
+              ...matchItem,
+              status: normStatus,
+              officerVerdict: remoteMatch.officer_verdict,
+              officerNote: remoteMatch.officer_note,
+              rewardPkr: normStatus === 'accepted' ? 200 : undefined,
+              penaltyPkr: normStatus === 'rejected' ? 50 : undefined,
+              frameUris: matchItem.frameUris || l.frame_uris,
+              videoUrl: matchItem.videoUrl || remoteMatch.video_url,
+            });
+          }
+
+          // If remote record is missing citizen-specified details that exist locally, sync them to Supabase
+          if (
+            (l.citizen_plate && !remoteMatch.citizen_plate) ||
+            (l.citizen_vehicle_model && !remoteMatch.citizen_vehicle_model) ||
+            (l.citizen_vehicle_color && !remoteMatch.citizen_vehicle_color) ||
+            (l.citizen_note && !remoteMatch.citizen_note)
+          ) {
+            void supabase.from('reports').update({
+              citizen_plate: l.citizen_plate || remoteMatch.citizen_plate,
+              citizen_vehicle_model: l.citizen_vehicle_model || remoteMatch.citizen_vehicle_model,
+              citizen_vehicle_color: l.citizen_vehicle_color || remoteMatch.citizen_vehicle_color,
+              citizen_vehicle_type: l.citizen_vehicle_type || remoteMatch.citizen_vehicle_type,
+              citizen_note: l.citizen_note || remoteMatch.citizen_note,
+            }).eq('report_id', remoteMatch.report_id);
+          }
+        }
+
         combined.push(l);
       }
 
-      // Merge any remote reports not in local and not deleted
+      // Merge any remote reports not in local and not deleted (e.g. after clean install / new device)
       for (const r of remoteList) {
         if (deletedIds.has(r.report_id) || (r.client_capture_id && deletedIds.has(r.client_capture_id))) {
           continue;
@@ -198,10 +355,13 @@ export function Vault() {
         if (!alreadyInLocal) {
           seen.add(r.report_id);
           if (r.client_capture_id) seen.add(r.client_capture_id);
-          let normStatus = r.status;
-          if (r.status === 'fined') normStatus = 'accepted';
-          else if (['no_violation', 'rejected_plate_blurred', 'rejected_vehicle_too_far', 'auto_rejected_low_clarity'].includes(r.status)) normStatus = 'rejected';
-          else if (['pending_manual_review', 'under_review'].includes(r.status)) normStatus = 'under_review';
+          const normStatus = resolveCanonicalReportStatus({
+            status: r.status,
+            officer_verdict: r.officer_verdict,
+            ai_verdict: r.ai_verdict,
+          });
+
+          const rFrames = await getReportFrames(r.report_id, r.client_capture_id, r.frame_uris, r.video_url);
 
           combined.push({
             report_id: r.report_id,
@@ -210,9 +370,21 @@ export function Vault() {
             status: normStatus,
             geo_lat: r.geo_lat,
             geo_long: r.geo_long,
+            location_name: r.location_name,
             reward_pkr: normStatus === 'accepted' ? 200 : undefined,
             penalty_pkr: normStatus === 'rejected' ? 50 : undefined,
+            plate_number: r.citizen_plate || r.vehicle_plate || undefined,
+            officer_verdict: r.officer_verdict,
+            officer_note: r.officer_note,
+            video_url: r.video_url,
+            confidence_score: r.ai_confidence ? Number(r.ai_confidence) : undefined,
+            frame_uris: rFrames.length > 0 ? rFrames : (Array.isArray(r.frame_uris) && r.frame_uris.length > 0 ? r.frame_uris : undefined),
             client_capture_id: r.client_capture_id,
+            citizen_plate: r.citizen_plate,
+            citizen_vehicle_model: r.citizen_vehicle_model,
+            citizen_vehicle_color: r.citizen_vehicle_color,
+            citizen_vehicle_type: r.citizen_vehicle_type,
+            citizen_note: r.citizen_note,
           });
         }
       }
@@ -220,14 +392,16 @@ export function Vault() {
       setReports(combined);
       setLoadError('');
     } catch {
+      const { data: auth } = await supabase.auth.getUser();
+      const currentUserId = auth?.user?.id;
       const deletedIds = new Set(await getDeletedReportIds());
       const localOnly = await getLocalReports();
       const filtered = localOnly.filter(
-        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId)
+        item => !deletedIds.has(item.reportId) && !deletedIds.has(item.clientCaptureId) && (!currentUserId || !item.reporterId || item.reporterId === currentUserId)
       );
       const mapped = await Promise.all(
         filtered.map(async (item) => {
-          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris);
+          const frames = await getReportFrames(item.reportId, item.clientCaptureId, item.frameUris, item.videoUri || item.videoUrl);
           return {
             report_id: item.reportId,
             claimed_class: item.claimedClass,
@@ -256,25 +430,82 @@ export function Vault() {
     }
   }, []);
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await loadReports();
+    setIsRefreshing(false);
+  }, [loadReports]);
+
   useEffect(() => {
     void loadReports();
+
+    // 1. Supabase Realtime Channel — instantly re-fetch when officer updates report status
+    const channel = supabase
+      .channel('vault_reports_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reports' },
+        () => {
+          void loadReports();
+        }
+      )
+      .subscribe();
+
+    // 2. High-reliability polling fallback every 5 seconds while user is on Vault
+    const pollInterval = setInterval(() => {
+      void loadReports();
+    }, 5000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
   }, [loadReports]);
 
   const pending = reports.filter(r => r.status === 'awaiting_upload' || r.status === 'failed');
   const sealed = reports.filter(r => !pending.includes(r));
 
-  const acceptedCount = sealed.filter(r => r.status === 'accepted').length;
-  const underReviewCount = sealed.filter(r => r.status === 'under_review' || r.status === 'pending_manual_review').length;
-  const rejectedCount = sealed.filter(r => r.status === 'rejected').length;
+  const acceptedCount = sealed.filter(r => r.status === 'accepted' || r.officer_verdict === 'accepted').length;
+  const underReviewCount = sealed.filter(r => (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && r.officer_verdict !== 'accepted' && r.officer_verdict !== 'rejected').length;
+  const rejectedCount = sealed.filter(r => {
+    const isAcc = r.status === 'accepted' || r.officer_verdict === 'accepted';
+    const isRev = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAcc && r.officer_verdict !== 'rejected';
+    return !isAcc && !isRev;
+  }).length;
+
+  // Filtered reports for currently active category
+  const categoryReports = useMemo(() => {
+    if (categoryFilter === 'accepted') {
+      return sealed.filter(r => r.status === 'accepted' || r.officer_verdict === 'accepted');
+    }
+    if (categoryFilter === 'under_review') {
+      return sealed.filter(r => (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && r.officer_verdict !== 'accepted' && r.officer_verdict !== 'rejected');
+    }
+    if (categoryFilter === 'rejected') {
+      return sealed.filter(r => {
+        const isAcc = r.status === 'accepted' || r.officer_verdict === 'accepted';
+        const isRev = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAcc && r.officer_verdict !== 'rejected';
+        return !isAcc && !isRev;
+      });
+    }
+    return sealed;
+  }, [sealed, categoryFilter]);
+
+  // Display initial 5 reports or all if expanded
+  const displayedReports = showAllReports ? categoryReports : categoryReports.slice(0, INITIAL_DISPLAY_COUNT);
 
   // Eligible reports for deletion: ONLY accepted or rejected (under_review is protected and CANNOT be deleted)
-  const eligibleReports = sealed.filter(r => r.status === 'accepted' || r.status === 'rejected');
+  const eligibleReports = categoryReports.filter(r => {
+    const isRev = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && r.officer_verdict !== 'accepted' && r.officer_verdict !== 'rejected';
+    return !isRev;
+  });
   const allEligibleSelected =
     eligibleReports.length > 0 && eligibleReports.every(r => selectedIds.includes(r.report_id));
 
   // Toggle selection for a card in selection mode
   const toggleSelect = (reportId: string, status: string) => {
-    const isDeletable = status === 'accepted' || status === 'rejected';
+    const isDeletable = status === 'accepted' || status === 'rejected' || (!status.includes('review') && !status.includes('disputed'));
     if (!isDeletable) {
       Alert.alert(
         isUrdu ? 'محفوظ رپورٹ' : 'Protected Record',
@@ -360,7 +591,17 @@ export function Vault() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.canvas }]}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.telemetry}
+            colors={[colors.telemetry]}
+          />
+        }
+      >
         {/* Title & Screen Clean Management Header */}
         <View style={styles.vaultTitleRow}>
           <View style={{ flex: 1 }}>
@@ -406,7 +647,20 @@ export function Vault() {
 
         {/* Dynamic Stats Grid: Accepted, Under Review, Rejected */}
         <View style={styles.statsRow}>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: 'rgba(16, 185, 129, 0.35)' }]}>
+          <TouchableOpacity
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: categoryFilter === 'accepted' ? 'rgba(16, 185, 129, 0.12)' : colors.surface,
+                borderColor: categoryFilter === 'accepted' ? colors.valid : 'rgba(16, 185, 129, 0.35)',
+              },
+            ]}
+            onPress={() => {
+              setCategoryFilter(prev => (prev === 'accepted' ? 'all' : 'accepted'));
+              setShowAllReports(false);
+            }}
+            activeOpacity={0.7}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <CheckCircle2 size={16} color={colors.valid} />
               <View style={[styles.statPill, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
@@ -415,9 +669,22 @@ export function Vault() {
             </View>
             <Text style={[styles.statValue, { color: colors.valid }]}>{acceptedCount}</Text>
             <Text style={[styles.statLabel, { color: colors.muted }]}>{t('approved')}</Text>
-          </View>
+          </TouchableOpacity>
 
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: 'rgba(245, 158, 11, 0.35)' }]}>
+          <TouchableOpacity
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: categoryFilter === 'under_review' ? 'rgba(245, 158, 11, 0.12)' : colors.surface,
+                borderColor: categoryFilter === 'under_review' ? colors.accent : 'rgba(245, 158, 11, 0.35)',
+              },
+            ]}
+            onPress={() => {
+              setCategoryFilter(prev => (prev === 'under_review' ? 'all' : 'under_review'));
+              setShowAllReports(false);
+            }}
+            activeOpacity={0.7}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <UserCheck size={16} color={colors.accent} />
               <View style={[styles.statPill, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
@@ -426,9 +693,22 @@ export function Vault() {
             </View>
             <Text style={[styles.statValue, { color: colors.accent }]}>{underReviewCount}</Text>
             <Text style={[styles.statLabel, { color: colors.muted }]}>{t('underHumanReview')}</Text>
-          </View>
+          </TouchableOpacity>
 
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: 'rgba(239, 68, 68, 0.35)' }]}>
+          <TouchableOpacity
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: categoryFilter === 'rejected' ? 'rgba(239, 68, 68, 0.12)' : colors.surface,
+                borderColor: categoryFilter === 'rejected' ? colors.signal : 'rgba(239, 68, 68, 0.35)',
+              },
+            ]}
+            onPress={() => {
+              setCategoryFilter(prev => (prev === 'rejected' ? 'all' : 'rejected'));
+              setShowAllReports(false);
+            }}
+            activeOpacity={0.7}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <AlertCircle size={16} color={colors.signal} />
               <View style={[styles.statPill, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
@@ -437,7 +717,7 @@ export function Vault() {
             </View>
             <Text style={[styles.statValue, { color: colors.signal }]}>{rejectedCount}</Text>
             <Text style={[styles.statLabel, { color: colors.muted }]}>{t('rejected')}</Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* Tab Selector */}
@@ -467,6 +747,107 @@ export function Vault() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Category Filter Pills (when activeTab is 'sealed') */}
+        {activeTab === 'sealed' && (
+          <View style={styles.categoryFilterRow}>
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'all' ? colors.telemetry : colors.edge,
+                  backgroundColor: categoryFilter === 'all' ? 'rgba(6, 182, 212, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('all');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'all' ? colors.telemetry : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'تمام ثبوت' : 'All Evidence'} ({sealed.length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'accepted' ? colors.valid : colors.edge,
+                  backgroundColor: categoryFilter === 'accepted' ? 'rgba(16, 185, 129, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('accepted');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'accepted' ? colors.valid : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'مصدقہ' : 'Approved'} ({acceptedCount})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'under_review' ? colors.accent : colors.edge,
+                  backgroundColor: categoryFilter === 'under_review' ? 'rgba(245, 158, 11, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('under_review');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'under_review' ? colors.accent : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'وارڈن جائزہ' : 'Under Review'} ({underReviewCount})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.categoryFilterPill,
+                {
+                  borderColor: categoryFilter === 'rejected' ? colors.signal : colors.edge,
+                  backgroundColor: categoryFilter === 'rejected' ? 'rgba(239, 68, 68, 0.12)' : colors.surface,
+                },
+              ]}
+              onPress={() => {
+                setCategoryFilter('rejected');
+                setShowAllReports(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.categoryFilterText,
+                  { color: categoryFilter === 'rejected' ? colors.signal : colors.muted },
+                ]}
+              >
+                {isUrdu ? 'مسترد' : 'Rejected'} ({rejectedCount})
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Multi-Selection Control Bar (When Selection Mode is Active) */}
         {isSelectionMode && activeTab === 'sealed' && (
@@ -514,14 +895,15 @@ export function Vault() {
         {/* List Content */}
         {activeTab === 'sealed' ? (
           <View style={styles.list}>
-            {sealed.map((r) => {
-              const isAccepted = r.status === 'accepted';
-              const isUnderReview = r.status === 'under_review' || r.status === 'pending_manual_review';
-              const isRejected = r.status === 'rejected' || (!isAccepted && !isUnderReview);
-              const isOfficerAccepted = isAccepted && r.officer_verdict === 'accepted';
-              const isOfficerRejected = isRejected && r.officer_verdict === 'rejected';
+            {displayedReports.map((r) => {
+              const isAccepted = r.status === 'accepted' || r.officer_verdict === 'accepted';
+              const isUnderReview = (r.status === 'under_review' || r.status === 'pending_manual_review' || r.status === 'disputed') && !isAccepted && r.officer_verdict !== 'rejected';
+              const isRejected = !isAccepted && !isUnderReview;
+              const isHumanOfficer = Boolean(r.officer_verdict) && !r.officer_note?.includes('Automated AI');
+              const isOfficerAccepted = isAccepted && r.officer_verdict === 'accepted' && isHumanOfficer;
+              const isOfficerRejected = isRejected && r.officer_verdict === 'rejected' && isHumanOfficer;
               const frames = r.frame_uris || [];
-              const isDeletable = isAccepted || isRejected;
+              const isDeletable = !isUnderReview;
               const isSelected = selectedIds.includes(r.report_id);
 
               return (
@@ -685,10 +1067,11 @@ export function Vault() {
                                 },
                               ]}
                             >
-                              <Image
-                                source={{ uri: fUri }}
+                              <EvidenceImage
+                                uri={fUri}
                                 style={styles.cardFrameThumb}
                                 resizeMode="cover"
+                                isViolationMoment={isVioMoment}
                               />
                               <View style={[styles.cardFramePill, isVioMoment && { backgroundColor: '#ef4444' }]}>
                                 <Text style={styles.cardFramePillText}>
@@ -753,7 +1136,7 @@ export function Vault() {
 
                     {/* Status Explanation note */}
                     <Text style={[styles.explanationText, { color: colors.muted }]}>
-                      {r.officer_note
+                      {isHumanOfficer && r.officer_note
                         ? r.officer_note
                         : isUnderReview
                         ? (isUrdu ? 'ٹریفک وارڈن کے زیرِ جائزہ۔ افسر ویڈیو فریمز اور شواہد کی تصدیق کر رہا ہے (یہ رپورٹ محفوظ ہے)۔' : 'Under Traffic Warden audit. Certified officer is reviewing evidence (Protected from deletion).')
@@ -778,10 +1161,78 @@ export function Vault() {
                 </View>
               );
             })}
-            {!sealed.length && (
-              <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 20 }}>
-                {t('noSealedRecords')}
-              </Text>
+
+            {categoryReports.length > INITIAL_DISPLAY_COUNT && (
+              <TouchableOpacity
+                style={[styles.showMoreDropdownBtn, { backgroundColor: colors.surface, borderColor: colors.edge }]}
+                onPress={() => setShowAllReports(prev => !prev)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.showMoreDropdownText, { color: colors.telemetry }]}>
+                  {showAllReports
+                    ? (isUrdu ? `کم دکھائیں (اوپر والے ${INITIAL_DISPLAY_COUNT})` : `Show Less (Top ${INITIAL_DISPLAY_COUNT})`)
+                    : (isUrdu ? `مزید دکھائیں (+${categoryReports.length - INITIAL_DISPLAY_COUNT})` : `Show More (+${categoryReports.length - INITIAL_DISPLAY_COUNT} Reports)`)}
+                </Text>
+                {showAllReports ? (
+                  <ChevronUp size={16} color={colors.telemetry} />
+                ) : (
+                  <ChevronDown size={16} color={colors.telemetry} />
+                )}
+              </TouchableOpacity>
+            )}
+
+            {!categoryReports.length && (
+              <View style={[styles.categoryEmptyCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+                {categoryFilter === 'accepted' ? (
+                  <>
+                    <CheckCircle2 size={32} color={colors.valid} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {isUrdu ? 'کوئی مصدقہ رپورٹ موجود نہیں' : 'No Approved Reports'}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'ٹریفک وارڈن یا AI سے تصدیق شدہ رپورٹس (+200 روپے) یہاں نظر آئیں گی۔'
+                        : 'Reports verified by traffic wardens or AI (+PKR 200 reward) will appear in this category.'}
+                    </Text>
+                  </>
+                ) : categoryFilter === 'under_review' ? (
+                  <>
+                    <UserCheck size={32} color={colors.accent} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {isUrdu ? 'کوئی کیس زیرِ جائزہ نہیں' : 'No Reports Under Review'}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'جن ویڈیوز کا وارڈن دستی آڈٹ کر رہا ہے وہ یہاں ظاہر ہوں گی۔'
+                        : 'Citizen submissions currently pending official traffic warden audit appear here.'}
+                    </Text>
+                  </>
+                ) : categoryFilter === 'rejected' ? (
+                  <>
+                    <AlertCircle size={32} color={colors.signal} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {isUrdu ? 'کوئی مسترد رپورٹ نہیں' : 'Zero Rejected Reports'}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'شاباش! آپ کی کسی رپورٹ پر کوئی غلط رپورٹنگ جرمانہ یا مستردگی لاگو نہیں ہوئی۔'
+                        : 'Excellent! None of your reports have been rejected or penalized.'}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <FileText size={32} color={colors.muted} />
+                    <Text style={[styles.categoryEmptyTitle, { color: colors.ink }]}>
+                      {t('noSealedRecords')}
+                    </Text>
+                    <Text style={[styles.categoryEmptySub, { color: colors.muted }]}>
+                      {isUrdu
+                        ? 'جب آپ ویڈیوز سبمٹ کریں گے، وہ یہاں محفوظ ہوں گی۔'
+                        : 'When you record and submit violation clips, they will appear here.'}
+                    </Text>
+                  </>
+                )}
+              </View>
             )}
           </View>
         ) : (
@@ -967,10 +1418,11 @@ export function Vault() {
                           activeOpacity={0.85}
                           onPress={() => setZoomFrameIndex(idx)}
                         >
-                          <Image
-                            source={{ uri: fUri }}
+                          <EvidenceImage
+                            uri={fUri}
                             style={styles.dossierFrameImage}
                             resizeMode="cover"
+                            isViolationMoment={isVioMoment}
                           />
                           <View style={styles.dossierFrameTopPills}>
                             <View
@@ -1048,15 +1500,15 @@ export function Vault() {
                       style={[
                         styles.thresholdValue,
                         {
-                          color: selectedReport.status === 'accepted'
+                          color: (selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected))
                             ? '#10b981'
                             : selectedReport.status === 'under_review' || selectedReport.status === 'pending_manual_review'
                             ? '#f59e0b'
-                            : colors.muted,
+                            : '#ef4444',
                         },
                       ]}
                     >
-                      {selectedReport.status === 'accepted'
+                      {(selectedReport.status === 'accepted' || Boolean(selectedReport.ai_result?.violationDetected))
                         ? 'YES'
                         : selectedReport.status === 'under_review' || selectedReport.status === 'pending_manual_review'
                         ? 'AUDITING'
@@ -1134,7 +1586,7 @@ export function Vault() {
                       <View style={styles.licensePlateContainer}>
                         <View style={styles.pakistanPlateBadge}>
                           <Text style={[styles.pakistanPlateText, { letterSpacing: 1.5 }]}>
-                            {(selectedReport.citizen_plate || selectedReport.plate_number || selectedReport.ai_result?.plateNumber || 'LEA-4471').toUpperCase()}
+                            {(selectedReport.citizen_plate || selectedReport.plate_number || selectedReport.ai_result?.plateNumber || (isUrdu ? 'غیر شناخت شدہ' : 'UNIDENTIFIED')).toUpperCase()}
                           </Text>
                         </View>
                       </View>
@@ -1445,10 +1897,11 @@ export function Vault() {
                           paddingHorizontal: 8,
                         }}
                       >
-                        <Image
-                          source={{ uri: fUri }}
+                        <EvidenceImage
+                          uri={fUri}
                           style={styles.lightboxImage}
                           resizeMode="contain"
+                          isViolationMoment={true}
                         />
                       </View>
                     ))}
@@ -2257,5 +2710,58 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.65)',
     fontSize: 11,
     textAlign: 'center',
+  },
+  categoryFilterRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 12,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  categoryFilterPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  categoryFilterText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  showMoreDropdownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 10,
+    gap: 8,
+  },
+  showMoreDropdownText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  categoryEmptyCard: {
+    padding: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 16,
+  },
+  categoryEmptyTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  categoryEmptySub: {
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 16,
   },
 });

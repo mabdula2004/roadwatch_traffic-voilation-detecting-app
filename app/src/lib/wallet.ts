@@ -1,8 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 
-const LOCAL_WALLET_BALANCE_KEY = '@roadwatch_citizen_wallet_balance';
-const DEFAULT_TEST_BALANCE = 500; // Default PKR 500 for testing so citizen can test manual review deductions immediately
+const DEFAULT_TEST_BALANCE = 0; // Fresh accounts start with 0 PKR
 
 export interface WalletState {
   balance: number;
@@ -14,6 +13,25 @@ export interface WalletState {
 let isSyncing = false;
 let pendingSyncBalance: number | null = null;
 let rlsNoticeShown = false;
+
+async function getActiveUserId(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getUser();
+    return data?.user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getWalletBalanceKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_wallet_balance_${uid}` : '@roadwatch_citizen_wallet_balance';
+}
+
+async function getWalletTxKey(): Promise<string> {
+  const uid = await getActiveUserId();
+  return uid ? `@roadwatch_wallet_transactions_${uid}` : '@roadwatch_citizen_wallet_transactions';
+}
 
 /**
  * Synchronizes wallet balance with Supabase reward_wallets table in a clean,
@@ -27,8 +45,7 @@ async function syncBalanceToSupabase(balance: number): Promise<boolean> {
   isSyncing = true;
 
   try {
-    const { data: session } = await supabase.auth.getUser();
-    const userId = session?.user?.id;
+    const userId = await getActiveUserId();
     if (!userId) return false;
 
     // Direct update attempt
@@ -60,14 +77,17 @@ async function syncBalanceToSupabase(balance: number): Promise<boolean> {
 
 /**
  * Pure read function for current citizen wallet balance.
- * Reads local AsyncStorage authoritatively during the session, and checks Supabase.
+ * Reads user-scoped AsyncStorage authoritatively during the session, and checks Supabase.
  * NEVER triggers write operations or side effects during read.
  */
 export async function getWalletBalance(): Promise<WalletState> {
-  // 1. Read cached local balance
+  const userId = await getActiveUserId();
+  const balanceKey = await getWalletBalanceKey();
+
+  // 1. Read cached local balance for this specific user
   let localBalance: number | null = null;
   try {
-    const cached = await AsyncStorage.getItem(LOCAL_WALLET_BALANCE_KEY);
+    const cached = await AsyncStorage.getItem(balanceKey);
     if (cached !== null) {
       const parsed = Number(cached);
       if (!isNaN(parsed)) {
@@ -76,16 +96,13 @@ export async function getWalletBalance(): Promise<WalletState> {
     }
   } catch {}
 
-  // 2. Check Supabase remote balance
+  // 2. Check Supabase remote balance for this specific user
   let remoteBalance: number | null = null;
   let pendingClearance = 0;
-  let epayLinked = true;
+  let epayLinked = false;
 
-  try {
-    const { data: session } = await supabase.auth.getUser();
-    const userId = session?.user?.id;
-
-    if (userId) {
+  if (userId) {
+    try {
       const { data, error } = await supabase
         .from('reward_wallets')
         .select('balance, pending_clearance, epay_linked')
@@ -95,34 +112,33 @@ export async function getWalletBalance(): Promise<WalletState> {
       if (!error && data) {
         remoteBalance = Number(data.balance ?? 0);
         pendingClearance = Number(data.pending_clearance ?? 0);
-        epayLinked = Boolean(data.epay_linked ?? true);
+        epayLinked = Boolean(data.epay_linked ?? false);
       }
+    } catch {
+      // Supabase network failure: safely continue with local cached balance
     }
-  } catch {
-    // Supabase network failure: safely continue with local cached balance
   }
 
   // 3. Resolve effective balance:
-  // - If local balance exists and is higher than remote (e.g. user just topped up), PRESERVE local!
-  // - If remote has a higher balance (e.g. server-awarded bounty), adopt remote.
-  // - Never let a stale remote 0 overwrite a user's active local top-up.
+  // - If remote record exists, use remote as authoritative (unless user made un-synced local top-up)
+  // - A new account with 0 remote balance gets 0 balance, never inheriting another account's data!
   let effectiveBalance: number;
-  if (localBalance !== null) {
-    if (remoteBalance !== null && remoteBalance > localBalance) {
-      effectiveBalance = remoteBalance;
-    } else {
+  if (remoteBalance !== null) {
+    if (localBalance !== null && localBalance > remoteBalance) {
       effectiveBalance = localBalance;
+    } else {
+      effectiveBalance = remoteBalance;
     }
-  } else if (remoteBalance !== null && remoteBalance > 0) {
-    effectiveBalance = remoteBalance;
+  } else if (localBalance !== null) {
+    effectiveBalance = localBalance;
   } else {
-    // Fresh initialization fallback
+    // Fresh initialization fallback for new user
     effectiveBalance = DEFAULT_TEST_BALANCE;
   }
 
-  // Persist resolved balance to local storage
+  // Persist resolved balance to user's local storage
   try {
-    await AsyncStorage.setItem(LOCAL_WALLET_BALANCE_KEY, String(effectiveBalance));
+    await AsyncStorage.setItem(balanceKey, String(effectiveBalance));
   } catch {}
 
   return {
@@ -144,11 +160,10 @@ export interface WalletTransaction {
   reason?: string;
 }
 
-const LOCAL_TRANSACTIONS_KEY = '@roadwatch_citizen_wallet_transactions';
-
 export async function getStoredTransactions(): Promise<WalletTransaction[]> {
   try {
-    const raw = await AsyncStorage.getItem(LOCAL_TRANSACTIONS_KEY);
+    const txKey = await getWalletTxKey();
+    const raw = await AsyncStorage.getItem(txKey);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -157,10 +172,11 @@ export async function getStoredTransactions(): Promise<WalletTransaction[]> {
 
 export async function recordWalletTransaction(tx: WalletTransaction): Promise<void> {
   try {
+    const txKey = await getWalletTxKey();
     const list = await getStoredTransactions();
     const filtered = list.filter(t => t.id !== tx.id);
     filtered.unshift(tx);
-    await AsyncStorage.setItem(LOCAL_TRANSACTIONS_KEY, JSON.stringify(filtered.slice(0, 100)));
+    await AsyncStorage.setItem(txKey, JSON.stringify(filtered.slice(0, 100)));
   } catch (e) {
     console.warn('Failed to record wallet transaction:', e);
   }
@@ -183,10 +199,11 @@ export async function deductWalletBalance(
   }
 
   const newBalance = Math.max(0, current.balance - amount);
+  const balanceKey = await getWalletBalanceKey();
 
-  // 1. Authoritatively update local cache immediately
+  // 1. Authoritatively update user-scoped local cache immediately
   try {
-    await AsyncStorage.setItem(LOCAL_WALLET_BALANCE_KEY, String(newBalance));
+    await AsyncStorage.setItem(balanceKey, String(newBalance));
   } catch {}
 
   // 2. Synchronize to Supabase in background (single debounced call)
@@ -217,10 +234,11 @@ export async function rechargeWalletBalance(
 ): Promise<{ success: boolean; newBalance: number }> {
   const current = await getWalletBalance();
   const newBalance = current.balance + amount;
+  const balanceKey = await getWalletBalanceKey();
 
-  // 1. Authoritatively update local cache immediately
+  // 1. Authoritatively update user-scoped local cache immediately
   try {
-    await AsyncStorage.setItem(LOCAL_WALLET_BALANCE_KEY, String(newBalance));
+    await AsyncStorage.setItem(balanceKey, String(newBalance));
   } catch {}
 
   // 2. Synchronize to Supabase in background (single debounced call)
@@ -242,3 +260,20 @@ export async function rechargeWalletBalance(
   return { success: true, newBalance };
 }
 
+/**
+ * Completely purges all wallet cache keys (legacy and user-scoped)
+ */
+export async function clearWalletCache(userId?: string): Promise<void> {
+  try {
+    const uid = userId || (await getActiveUserId());
+    const keysToRemove = [
+      '@roadwatch_citizen_wallet_balance',
+      '@roadwatch_citizen_wallet_transactions',
+    ];
+    if (uid) {
+      keysToRemove.push(`@roadwatch_wallet_balance_${uid}`);
+      keysToRemove.push(`@roadwatch_wallet_transactions_${uid}`);
+    }
+    await AsyncStorage.multiRemove(keysToRemove);
+  } catch {}
+}

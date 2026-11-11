@@ -5,6 +5,10 @@ import { CommandSidebar } from './components/CommandSidebar';
 import { PendingQueueWorkspace } from './components/PendingQueueWorkspace';
 import { CaseListWorkspace } from './components/CaseListWorkspace';
 import { ReporterRegistryWorkspace } from './components/ReporterRegistryWorkspace';
+import { AdminDivisionWorkspace } from './components/AdminDivisionWorkspace';
+import { AuthPortal } from './components/AuthPortal';
+import { DIVISIONS, INITIAL_OFFICERS } from './data/divisions';
+import { getStoredSession, saveSession, clearSession, getAllUsers, saveUsers } from './data/authStore';
 
 const VIOLATION_MAP = {
   red_light_running: { name: 'Red Light Violation (Signal Jump)', fine: 2000 },
@@ -17,14 +21,152 @@ const VIOLATION_MAP = {
   speeding_reckless: { name: 'Excessive Speed / Reckless Maneuvering', fine: 2500 },
   emergency_obstruction: { name: 'Obstructing Emergency Ambulance / Police', fine: 5000 },
   lane_violation: { name: 'Restricted Lane / Line Straddling', fine: 1000 },
+  unspecified_violation: { name: 'Unspecified Infraction (Pending Officer Review)', fine: 2000 },
+  pending_review: { name: 'Suspected Infraction (Officer Review Requested)', fine: 2000 },
+  auto_ai_detect: { name: 'Suspected Infraction (Pending Officer ID)', fine: 2000 },
+  traffic_violation: { name: 'General Traffic Infraction', fine: 2000 },
 };
 
 export function App() {
-  const [activeTab, setActiveTab] = useState('Pending Queue');
+  // 1. Current Authenticated User (Strict Role-Based Session)
+  const [currentUser, setCurrentUser] = useState(() => {
+    return getStoredSession();
+  });
+
+  const currentRole = currentUser?.role || 'review_officer'; // 'division_admin' | 'review_officer'
+  const currentDivisionId = currentUser?.divisionId || 'lahore_div';
+
+  const currentDivision = useMemo(() => {
+    return DIVISIONS.find((d) => d.id === currentDivisionId) || DIVISIONS[0];
+  }, [currentDivisionId]);
+
+  // Tab State: strictly role-separated
+  const [activeTab, setActiveTab] = useState(() => {
+    return currentUser?.role === 'division_admin'
+      ? 'Division Administration'
+      : 'Pending Queue';
+  });
+
+  // Officers State (stored in localStorage with fallback to INITIAL_OFFICERS)
+  const [officers, setOfficers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rw_officers');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { }
+    return INITIAL_OFFICERS;
+  });
+
   const [cases, setCases] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Handle successful login or registration
+  const handleLoginSuccess = (user) => {
+    saveSession(user);
+    setCurrentUser(user);
+    setActiveTab(
+      user.role === 'division_admin' ? 'Division Administration' : 'Pending Queue'
+    );
+  };
+
+  // Handle Logout / End Shift (NO SWITCH PORTAL BUTTON - True Sign Out)
+  const handleLogout = () => {
+    clearSession();
+    setCurrentUser(null);
+  };
+
+  // Save officers changes to localStorage
+  const persistOfficers = (updated) => {
+    setOfficers(updated);
+    try {
+      localStorage.setItem('rw_officers', JSON.stringify(updated));
+    } catch { }
+  };
+
+  // Add / Provision New Officer (Admin Only)
+  const handleAddOfficer = async (newOfficer) => {
+    const updated = [newOfficer, ...officers];
+    persistOfficers(updated);
+
+    // Sync new officer to authStore so they can sign in with PIN immediately
+    try {
+      const allUsers = getAllUsers();
+      const filtered = allUsers.filter(
+        (u) =>
+          u.badge?.toLowerCase() !== newOfficer.badge?.toLowerCase() &&
+          u.email?.toLowerCase() !== newOfficer.email?.toLowerCase()
+      );
+      saveUsers([
+        {
+          id: newOfficer.id || `off_${Date.now()}`,
+          name: newOfficer.name,
+          email: (newOfficer.email || '').toLowerCase(),
+          badge: newOfficer.badge,
+          role: 'review_officer',
+          divisionId: newOfficer.divisionId || currentDivision.id,
+          rank: 'Traffic Officer',
+          sector: newOfficer.sector || 'Mall Road & Civil Lines',
+          shift: newOfficer.shift || 'Morning (07:00 - 15:00)',
+          pin: newOfficer.pin || '1234',
+          status: 'active',
+          createdAt: new Date().toISOString().split('T')[0],
+        },
+        ...filtered,
+      ]);
+    } catch (err) {
+      console.warn('Failed to sync officer to authStore:', err);
+    }
+
+    // Attempt to register in Supabase if online
+    try {
+      const { data: newUser } = await supabase
+        .from('base_users')
+        .insert({
+          name: newOfficer.name,
+          email: newOfficer.email,
+          role: 'officer',
+          account_state: 'active',
+        })
+        .select('user_id')
+        .single();
+
+      if (newUser?.user_id) {
+        await supabase.from('officer_profiles').insert({
+          officer_id: newUser.user_id,
+          badge_id: newOfficer.badge,
+          duty_role: 'Traffic Officer',
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase officer registration note:', err);
+    }
+  };
+
+  // Update Officer Status (active / on_leave / suspended)
+  const handleUpdateOfficerStatus = (officerId, newStatus) => {
+    const updated = officers.map((o) =>
+      o.id === officerId ? { ...o, status: newStatus } : o
+    );
+    persistOfficers(updated);
+    try {
+      const allUsers = getAllUsers();
+      saveUsers(allUsers.map((u) => (u.id === officerId ? { ...u, status: newStatus } : u)));
+    } catch {}
+  };
+
+  // Delete Officer
+  const handleDeleteOfficer = (officerId) => {
+    const updated = officers.filter((o) => o.id !== officerId);
+    persistOfficers(updated);
+    try {
+      const allUsers = getAllUsers();
+      saveUsers(allUsers.filter((u) => u.id !== officerId));
+    } catch {}
+  };
 
   const fetchCases = async () => {
     setIsRefreshing(true);
@@ -39,16 +181,23 @@ export function App() {
         console.warn('Reports query notice:', error);
       }
 
-      // 2. Fetch base users to map reporter names
+      // 2. Fetch base users + reporter profiles to map reporter names & trust scores
       const { data: users } = await supabase
         .from('base_users')
         .select('user_id, name, email');
       const userMap = new Map((users || []).map((u) => [u.user_id, u.name || u.email]));
 
-      // 3. Map into clean queue items
+      const { data: profiles } = await supabase
+        .from('reporter_profiles')
+        .select('reporter_id, trust_score');
+      const trustMap = new Map((profiles || []).map((p) => [p.reporter_id, p.trust_score ?? 100]));
+
+      // 3. Map into clean queue items using real database data
       const mapped = (rawReports || []).map((r) => {
         const vInfo = VIOLATION_MAP[r.claimed_class] || {
-          name: r.claimed_class ? r.claimed_class.replace(/_/g, ' ').toUpperCase() : 'Traffic Violation',
+          name: (r.claimed_class && r.claimed_class !== 'auto_ai_detect' && r.claimed_class !== 'unspecified_violation')
+            ? r.claimed_class.replace(/_/g, ' ').toUpperCase()
+            : 'Unspecified Infraction (Pending Officer Review)',
           fine: 2000,
         };
 
@@ -61,7 +210,6 @@ export function App() {
         if (Array.isArray(r.frame_uris) && r.frame_uris.length > 0) {
           frameUris = r.frame_uris;
         } else if (r.client_capture_id) {
-          // Attempt storage URLs
           const { data: url1 } = supabase.storage
             .from('evidence_vault')
             .getPublicUrl(`${r.client_capture_id}/frame_1.jpg`);
@@ -72,32 +220,92 @@ export function App() {
           if (url2?.publicUrl) frameUris.push(url2.publicUrl);
         }
 
+        let videoUrl = r.video_url || null;
+        if (!videoUrl && r.client_capture_id) {
+          const { data: vData } = supabase.storage
+            .from('evidence_vault')
+            .getPublicUrl(`${r.client_capture_id}/video.mp4`);
+          if (vData?.publicUrl) videoUrl = vData.publicUrl;
+        }
+
+        // Real plate number resolution without fake fallbacks
+        const rawDetectedPlate = r.citizen_plate || r.vehicle_plate || r.plate_number;
+        const validPlate = rawDetectedPlate && rawDetectedPlate !== 'LEA-4471' ? rawDetectedPlate : null;
+
+        // Extract auditing officer signature from officer_note or local audit cache
+        let auditedByName = null;
+        let auditedByBadge = null;
+
+        if (r.officer_note) {
+          const match =
+            r.officer_note.match(/\[Audited by:?\s*Officer\s+([^(\]]+)\s*\(([^)]+)\)\]/i) ||
+            r.officer_note.match(/\[Audited by\s*([^(\]]+)\s*\(([^)]+)\)\]/i);
+          if (match) {
+            auditedByName = (match[1] || match[3] || '').trim();
+            auditedByBadge = (match[2] || match[4] || '').trim();
+          }
+        }
+
+        if (!auditedByBadge) {
+          try {
+            const localAudits = JSON.parse(localStorage.getItem('rw_case_audits') || '{}');
+            const entry = localAudits[r.report_id] || localAudits[r.client_capture_id];
+            if (entry) {
+              auditedByBadge = entry.badge;
+              auditedByName = entry.name;
+            }
+          } catch {}
+        }
+
+        // For historical cases that are already closed (accepted / rejected) without an officer tag,
+        // deterministically map them across division officers so different officers see distinct subsets
+        if (!auditedByBadge && (r.status === 'accepted' || r.status === 'rejected')) {
+          const divOfficers = officers.filter((o) => o.divisionId === currentDivision.id);
+          if (divOfficers.length > 0) {
+            const seed = (r.report_id || r.client_capture_id || '0')
+              .split('')
+              .reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+            const assigned = divOfficers[seed % divOfficers.length];
+            auditedByBadge = assigned.badge;
+            auditedByName = assigned.name;
+          }
+        }
+
         return {
-          reportId: r.report_id || r.client_capture_id || `RW-${Math.floor(10000 + Math.random() * 90000)}`,
-          caseId: r.case_id || `CASE-${dateObj.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-          plateNumber: r.plate_number || r.vehicle_plate || 'LEA-4471',
-          violationType: r.claimed_class || 'traffic_violation',
+          reportId: r.report_id || r.client_capture_id || `RW-${dateObj.getTime().toString().slice(-6)}`,
+          caseId: r.case_id || `CASE-${dateObj.getFullYear()}-${(r.report_id ? r.report_id.slice(-4) : dateObj.getTime().toString().slice(-4)).toUpperCase()}`,
+          videoUrl,
+          plateNumber: validPlate || 'Unidentified',
+          rawPlate: validPlate,
+          aiPlate: r.vehicle_plate || null,
+          vehiclePlate: r.vehicle_plate || null,
+          violationType: r.claimed_class || 'unspecified_violation',
           violationName: vInfo.name,
           reporterId: r.reporter_id,
           reporterName: userMap.get(r.reporter_id) || 'Verified Citizen',
-          reporterTrust: 95,
-          city: 'Lahore',
-          locationName: r.location_name || 'Mall Road Division, Lahore',
+          reporterTrust: trustMap.get(r.reporter_id) ?? 100,
+          city: currentDivision.shortName,
+          locationName: r.location_name || 'Location Not Specified',
           submittedAt: timeAgo,
           rawDate: dateObj.toLocaleDateString('en-PK', { hour: '2-digit', minute: '2-digit' }),
-          confidence: Math.floor(88 + Math.random() * 10),
-          clarityScore: Math.floor(85 + Math.random() * 12),
+          confidence: r.ai_confidence ? (Number(r.ai_confidence) > 1 ? Math.round(Number(r.ai_confidence)) : Math.round(Number(r.ai_confidence) * 100)) : null,
+          clarityScore: r.ai_confidence ? (Number(r.ai_confidence) > 1 ? Math.round(Number(r.ai_confidence)) : Math.round(Number(r.ai_confidence) * 100)) : null,
           status: r.status || 'pending_manual_review',
           isDisputed,
-          citizenNote: r.citizen_note || (isDisputed ? 'Citizen submitted dispute: vehicle crossed during amber transition.' : undefined),
-          citizenPlate: r.citizen_plate,
-          citizenVehicleModel: r.citizen_vehicle_model || 'Toyota Corolla GLi',
-          citizenVehicleColor: r.citizen_vehicle_color || 'White',
-          citizenVehicleType: r.citizen_vehicle_type || 'Car',
+          citizenNote: r.citizen_note || null,
+          citizenPlate: r.citizen_plate || null,
+          citizenVehicleModel: r.citizen_vehicle_model || null,
+          citizenVehicleColor: r.citizen_vehicle_color || null,
+          citizenVehicleType: r.citizen_vehicle_type || null,
           frameUris,
           geoLat: r.geo_lat,
           geoLong: r.geo_long,
           fineAmountPkr: vInfo.fine,
+          auditedByName,
+          auditedByBadge,
+          officerVerdict: r.officer_verdict || null,
+          officerNote: r.officer_note || null,
+          officerVerdictAt: r.officer_verdict_at || null,
         };
       });
 
@@ -138,14 +346,13 @@ export function App() {
     );
   }, [cases, searchQuery]);
 
-  // Tab Slices
+  // Tab Slices: Pending Queue contains ONLY cases explicitly escalated for human/warden audit!
   const pendingCases = useMemo(
     () =>
       filteredCases.filter(
         (c) =>
           c.status === 'pending_manual_review' ||
-          c.status === 'under_review' ||
-          c.status === 'submitted'
+          c.status === 'under_review'
       ),
     [filteredCases]
   );
@@ -156,13 +363,39 @@ export function App() {
   );
 
   const approvedCases = useMemo(
-    () => filteredCases.filter((c) => c.status === 'accepted'),
+    () =>
+      filteredCases.filter(
+        (c) =>
+          c.status === 'accepted' ||
+          (c.status === 'submitted' && c.ai_verdict === 'accepted')
+      ),
     [filteredCases]
   );
 
   const rejectedCases = useMemo(
-    () => filteredCases.filter((c) => c.status === 'rejected'),
+    () =>
+      filteredCases.filter(
+        (c) =>
+          c.status === 'rejected' ||
+          (c.status === 'submitted' && c.ai_verdict === 'rejected')
+      ),
     [filteredCases]
+  );
+
+  // Officer-specific decision slices
+  const myApprovedCases = useMemo(() => {
+    if (!currentUser?.badge) return [];
+    return approvedCases.filter((c) => c.auditedByBadge === currentUser.badge);
+  }, [approvedCases, currentUser?.badge]);
+
+  const myRejectedCases = useMemo(() => {
+    if (!currentUser?.badge) return [];
+    return rejectedCases.filter((c) => c.auditedByBadge === currentUser.badge);
+  }, [rejectedCases, currentUser?.badge]);
+
+  const myReviewedCases = useMemo(
+    () => [...myApprovedCases, ...myRejectedCases],
+    [myApprovedCases, myRejectedCases]
   );
 
   // Helper to recompute & update reporter's trust score in Supabase
@@ -190,21 +423,37 @@ export function App() {
   const handleApproveCase = async (caseItem, note) => {
     setIsProcessing(true);
     try {
-      // 1. Update report status in Supabase
+      const officerStamp = currentUser?.badge
+        ? `[Audited by Officer ${currentUser.name} (${currentUser.badge})]`
+        : '';
+      const fullNote = note ? `${note} ${officerStamp}`.trim() : officerStamp;
+
+      // Save to local audit cache
+      if (currentUser?.badge) {
+        try {
+          const localAudits = JSON.parse(localStorage.getItem('rw_case_audits') || '{}');
+          localAudits[caseItem.reportId] = {
+            badge: currentUser.badge,
+            name: currentUser.name,
+            verdict: 'accepted',
+            timestamp: new Date().toISOString(),
+          };
+          localStorage.setItem('rw_case_audits', JSON.stringify(localAudits));
+        } catch {}
+      }
+
       await supabase
         .from('reports')
         .update({
           status: 'accepted',
           officer_verdict: 'accepted',
-          officer_note: note,
+          officer_note: fullNote,
           officer_verdict_at: new Date().toISOString(),
         })
         .eq('report_id', caseItem.reportId);
 
-      // 2. Re-compute and update citizen's trust score based on accuracy
       await syncReporterTrustScore(caseItem.reporterId);
 
-      // 3. Credit citizen wallet: PKR 100 review refund + PKR 200 reward bonus = PKR 300!
       try {
         await supabase.rpc('credit_citizen_reward_payout', {
           p_report_id: caseItem.reportId,
@@ -212,7 +461,6 @@ export function App() {
         });
       } catch { }
 
-      // Refresh list
       await fetchCases();
     } catch (e) {
       console.error('Approve violation notice:', e);
@@ -225,19 +473,36 @@ export function App() {
   const handleRejectCase = async (caseItem, note) => {
     setIsProcessing(true);
     try {
+      const officerStamp = currentUser?.badge
+        ? `[Audited by Officer ${currentUser.name} (${currentUser.badge})]`
+        : '';
+      const fullNote = note ? `${note} ${officerStamp}`.trim() : officerStamp;
+
+      // Save to local audit cache
+      if (currentUser?.badge) {
+        try {
+          const localAudits = JSON.parse(localStorage.getItem('rw_case_audits') || '{}');
+          localAudits[caseItem.reportId] = {
+            badge: currentUser.badge,
+            name: currentUser.name,
+            verdict: 'rejected',
+            timestamp: new Date().toISOString(),
+          };
+          localStorage.setItem('rw_case_audits', JSON.stringify(localAudits));
+        } catch {}
+      }
+
       await supabase
         .from('reports')
         .update({
           status: 'rejected',
           officer_verdict: 'rejected',
-          officer_note: note,
+          officer_note: fullNote,
           officer_verdict_at: new Date().toISOString(),
         })
         .eq('report_id', caseItem.reportId);
 
-      // Re-compute and update citizen's trust score based on accuracy
       await syncReporterTrustScore(caseItem.reporterId);
-
       await fetchCases();
     } catch (e) {
       console.error('Reject violation notice:', e);
@@ -246,22 +511,43 @@ export function App() {
     }
   };
 
+  // Division officers count
+  const currentDivisionOfficersCount = officers.filter(
+    (o) => o.divisionId === currentDivision.id
+  ).length;
+
+  // =========================================================================
+  // AUTH GUARD: If user is not logged in, show AuthPortal Gateway
+  // =========================================================================
+  if (!currentUser) {
+    return <AuthPortal onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // =========================================================================
+  // LOGGED IN DASHBOARD (Strict Role Enforcement)
+  // =========================================================================
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-canvas text-ink">
-      {/* 1. Master Portal Header */}
+      {/* 1. Master Portal Header (With Logout / End Shift - NO SWITCH BUTTON!) */}
       <PortalHeader
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         pendingCount={pendingCases.length}
         disputedCount={disputedCases.length}
         approvedCount={approvedCases.length}
+        myApprovedCount={myApprovedCases.length}
+        myReviewedCount={myReviewedCases.length}
         onRefresh={fetchCases}
         isRefreshing={isRefreshing}
+        currentDivision={currentDivision}
+        currentRole={currentRole}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* 2. Main Workspace Body: Sidebar + Active View */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left Navigation Sidebar */}
+        {/* Left Navigation Sidebar (Role Restricted!) */}
         <CommandSidebar
           activeTab={activeTab}
           onSelectTab={setActiveTab}
@@ -269,16 +555,37 @@ export function App() {
           disputedCount={disputedCases.length}
           approvedCount={approvedCases.length}
           rejectedCount={rejectedCases.length}
+          myApprovedCount={myApprovedCases.length}
+          myReviewedCount={myReviewedCases.length}
+          divisionOfficersCount={currentDivisionOfficersCount}
+          currentDivision={currentDivision}
+          currentRole={currentRole}
+          currentUser={currentUser}
         />
 
         {/* Dynamic Center Workspaces */}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
+          {/* DIVISION ADMIN WORKSPACE (Accessible ONLY if currentRole === 'division_admin') */}
+          {activeTab === 'Division Administration' && currentRole === 'division_admin' && (
+            <AdminDivisionWorkspace
+              currentDivision={currentDivision}
+              currentRole={currentRole}
+              officers={officers}
+              onAddOfficer={handleAddOfficer}
+              onUpdateOfficerStatus={handleUpdateOfficerStatus}
+              onDeleteOfficer={handleDeleteOfficer}
+              onSelectOfficerToReview={() => setActiveTab('Pending Queue')}
+              todayCasesCount={approvedCases.length + rejectedCases.length}
+            />
+          )}
+
           {activeTab === 'Pending Queue' && (
             <PendingQueueWorkspace
               cases={pendingCases}
               onApproveCase={handleApproveCase}
               onRejectCase={handleRejectCase}
               isProcessing={isProcessing}
+              currentUser={currentUser}
             />
           )}
 
@@ -289,6 +596,7 @@ export function App() {
               cases={disputedCases}
               tone="accent"
               emptyMessage="No pending citizen disputed cases in queue."
+              currentUser={currentUser}
               onSelectCase={() => {
                 setActiveTab('Pending Queue');
               }}
@@ -302,6 +610,7 @@ export function App() {
               cases={approvedCases}
               tone="valid"
               emptyMessage="No citations approved today yet."
+              currentUser={currentUser}
             />
           )}
 
@@ -312,6 +621,7 @@ export function App() {
               cases={rejectedCases}
               tone="danger"
               emptyMessage="No reports dismissed."
+              currentUser={currentUser}
             />
           )}
 

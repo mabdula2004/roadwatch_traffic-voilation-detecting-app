@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -8,21 +8,57 @@ import {
   ZoomIn,
   Check,
   X,
+  Video,
+  Camera,
+  Play,
 } from 'lucide-react';
 import { Badge } from './ui/Badge';
 
 export function PendingQueueWorkspace({
-  cases,
+  cases = [],
   onApproveCase,
   onRejectCase,
   isProcessing,
+  currentUser,
 }) {
-  const [selectedCaseId, setSelectedCaseId] = useState(cases[0]?.reportId || '');
+  const officerSector = currentUser?.sector || '';
+
+  // Filter cases assigned to current officer's sector/beat
+  const sectorCases = useMemo(() => {
+    if (!officerSector) return cases;
+    const words = officerSector
+      .split('&')
+      .map((w) => w.trim().toLowerCase())
+      .flatMap((w) => w.split(' '))
+      .filter((w) => w.length > 3);
+
+    const matched = cases.filter((c) => {
+      const loc = (c.locationName || '').toLowerCase();
+      return words.some((w) => loc.includes(w));
+    });
+
+    if (matched.length > 0) return matched;
+    // Partition queue among officers if exact text match isn't present
+    const badgeNum = parseInt(currentUser?.badge?.replace(/\D/g, '') || '0', 10);
+    const subset = cases.filter((_, idx) => idx % 2 === (badgeNum % 2));
+    return subset.length > 0 ? subset : cases;
+  }, [cases, officerSector, currentUser?.badge]);
+
+  const [queueFilter, setQueueFilter] = useState('all'); // 'sector' | 'all'
+
+  const displayedCases = queueFilter === 'sector' ? sectorCases : cases;
+
+  const [selectedCaseId, setSelectedCaseId] = useState(displayedCases[0]?.reportId || cases[0]?.reportId || '');
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
+  const [mediaMode, setMediaMode] = useState('frames'); // 'frames' | 'video'
   const [officerNote, setOfficerNote] = useState('');
   const [zoomModalImage, setZoomModalImage] = useState(null);
 
-  const selectedCase = cases.find((c) => c.reportId === selectedCaseId) || cases[0];
+  const selectedCase =
+    displayedCases.find((c) => c.reportId === selectedCaseId) ||
+    cases.find((c) => c.reportId === selectedCaseId) ||
+    displayedCases[0] ||
+    cases[0];
 
   const handleApprove = async () => {
     if (!selectedCase) return;
@@ -47,8 +83,19 @@ export function PendingQueueWorkspace({
             Audit Queue Cleared
           </h3>
           <p className="mt-1 text-xs text-muted">
-            There are currently no pending violation reports requiring officer audit in this queue. New reports will appear live as submitted by citizens.
+            {queueFilter === 'sector'
+              ? `No pending cases in your assigned sector (${officerSector}). Switch to "All Division" to inspect global cases.`
+              : 'There are currently no pending violation reports requiring officer audit in this queue.'}
           </p>
+          {queueFilter === 'sector' && (
+            <button
+              type="button"
+              onClick={() => setQueueFilter('all')}
+              className="mt-3 inline-flex items-center gap-1 rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs font-semibold text-telemetry hover:border-telemetry"
+            >
+              View All Division Queue ({cases.length})
+            </button>
+          )}
         </div>
       </div>
     );
@@ -63,15 +110,48 @@ export function PendingQueueWorkspace({
           LEFT COLUMN: Live Pending Cases Queue (320px)
          ========================================================================= */}
       <div className="thin-scroll flex w-80 shrink-0 flex-col border-r border-edge bg-canvas/60 overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-edge bg-surface/90 px-4 py-3 backdrop-blur-md">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
-            Pending Cases ({cases.length})
-          </p>
-          <span className="text-[10px] font-semibold text-telemetry">Priority Audit</span>
+        <div className="sticky top-0 z-10 border-b border-edge bg-surface/95 px-3 py-2.5 backdrop-blur-md space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+              Pending Queue ({displayedCases.length})
+            </p>
+            <span className="text-[10px] font-semibold text-telemetry">
+              {currentUser?.badge ? `Officer ${currentUser.badge}` : 'Queue'}
+            </span>
+          </div>
+
+          {/* Sector vs Division Queue Switcher */}
+          {officerSector ? (
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-edge bg-canvas/70 p-0.5 text-2xs">
+              <button
+                type="button"
+                onClick={() => setQueueFilter('sector')}
+                className={`truncate rounded px-2 py-1 font-semibold transition ${
+                  queueFilter === 'sector'
+                    ? 'bg-telemetry text-black font-bold shadow-sm'
+                    : 'text-muted hover:text-ink'
+                }`}
+                title={`My Sector: ${officerSector}`}
+              >
+                My Sector ({sectorCases.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setQueueFilter('all')}
+                className={`truncate rounded px-2 py-1 font-semibold transition ${
+                  queueFilter === 'all'
+                    ? 'bg-telemetry text-black font-bold shadow-sm'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                All Division ({cases.length})
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="divide-y divide-edge/60">
-          {cases.map((c) => {
+          {displayedCases.map((c) => {
             const isSelected = c.reportId === selectedCase.reportId;
             return (
               <button
@@ -89,7 +169,7 @@ export function PendingQueueWorkspace({
               >
                 <div className="flex items-center justify-between">
                   <span className="tabular font-display text-sm font-bold text-ink">
-                    {c.plateNumber || 'PLATE UNKNOWN'}
+                    {c.citizenPlate || c.plateNumber || 'PLATE UNKNOWN'}
                   </span>
                   <span className="text-[10px] text-muted">{c.submittedAt}</span>
                 </div>
@@ -126,10 +206,14 @@ export function PendingQueueWorkspace({
           <div>
             <div className="flex items-center gap-3">
               <span className="tabular font-display text-2xl font-bold tracking-tight text-ink">
-                {selectedCase.plateNumber || 'NO PLATE DETECTED'}
+                {selectedCase.citizenPlate || selectedCase.plateNumber || 'NO PLATE DETECTED'}
               </span>
-              <Badge tone={selectedCase.isDisputed ? 'accent' : 'telemetry'}>
-                {selectedCase.isDisputed ? 'CITIZEN PKR 100 DISPUTE' : 'AUTOMATED AI FLAGGED'}
+              <Badge tone={selectedCase.isDisputed ? 'accent' : selectedCase.citizenPlate ? 'accent' : 'telemetry'}>
+                {selectedCase.isDisputed
+                  ? 'CITIZEN PKR 100 DISPUTE'
+                  : selectedCase.citizenPlate
+                  ? 'CITIZEN SPECIFIED EVIDENCE'
+                  : 'AUTOMATED AI FLAGGED'}
               </Badge>
               <span className="rounded border border-edge bg-surface px-2 py-0.5 text-2xs font-semibold text-muted">
                 {selectedCase.caseId}
@@ -155,13 +239,82 @@ export function PendingQueueWorkspace({
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
           {/* Visual Evidence Station (7 cols) */}
           <div className="space-y-4 lg:col-span-7">
+            {/* Media Mode Header Tabs */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('frames')}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                    mediaMode === 'frames'
+                      ? 'bg-accent text-canvas shadow'
+                      : 'border border-edge bg-surface text-muted hover:text-ink'
+                  }`}
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  <span>Keyframes ({frames.length || 0})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('video')}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                    mediaMode === 'video'
+                      ? 'bg-telemetry text-canvas shadow'
+                      : 'border border-edge bg-surface text-muted hover:text-ink'
+                  }`}
+                >
+                  <Video className="h-3.5 w-3.5" />
+                  <span>Full Video MP4 {selectedCase.videoUrl ? '🎬' : ''}</span>
+                </button>
+              </div>
+
+              {selectedCase.videoUrl && mediaMode === 'frames' && (
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('video')}
+                  className="flex items-center gap-1 text-2xs font-semibold text-telemetry hover:underline"
+                >
+                  <Play className="h-3 w-3" />
+                  <span>Play Clip</span>
+                </button>
+              )}
+            </div>
+
             {/* Main Stage Image / Video Viewer */}
             <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-edge bg-black shadow-lg">
-              {currentFrameUri ? (
+              {mediaMode === 'video' ? (
+                selectedCase.videoUrl ? (
+                  <video
+                    key={selectedCase.videoUrl}
+                    controls
+                    autoPlay
+                    playsInline
+                    src={selectedCase.videoUrl}
+                    className="h-full w-full object-contain bg-black"
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center p-6 text-center text-muted">
+                    <Video className="h-10 w-10 text-muted/40" />
+                    <p className="mt-2 text-xs font-bold text-ink">No Recorded Video Clip Available</p>
+                    <p className="mt-1 max-w-xs text-2xs text-muted">
+                      This case has keyframe snapshots available. Click below to inspect keyframe images.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setMediaMode('frames')}
+                      className="mt-3 rounded-lg border border-edge bg-surface px-3 py-1.5 text-2xs font-bold text-accent hover:bg-surface/80"
+                    >
+                      View Extracted Keyframes
+                    </button>
+                  </div>
+                )
+              ) : currentFrameUri ? (
                 <img
                   src={currentFrameUri}
                   alt="Evidence Frame"
-                  className="h-full w-full object-contain cursor-zoom-in"
+                  className="h-full w-full cursor-zoom-in object-contain"
                   onClick={() => setZoomModalImage(currentFrameUri)}
                 />
               ) : (
@@ -172,19 +325,21 @@ export function PendingQueueWorkspace({
               )}
 
               {/* Overlay Badges */}
-              <div className="absolute left-3 top-3 flex items-center gap-2">
-                <span className="rounded bg-black/75 px-2 py-1 text-2xs font-bold text-white backdrop-blur-sm">
-                  FRAME {selectedFrameIndex + 1} OF {frames.length || 1}
-                </span>
-                {selectedFrameIndex === 1 && (
-                  <span className="rounded bg-signal/90 px-2 py-1 text-2xs font-bold text-white shadow-glow-red">
-                    ⚡ VIOLATION MOMENT
+              {mediaMode === 'frames' && (
+                <div className="absolute left-3 top-3 flex items-center gap-2">
+                  <span className="rounded bg-black/75 px-2 py-1 text-2xs font-bold text-white backdrop-blur-sm">
+                    FRAME {selectedFrameIndex + 1} OF {frames.length || 1}
                   </span>
-                )}
-              </div>
+                  {selectedFrameIndex === 1 && (
+                    <span className="shadow-glow-red rounded bg-signal/90 px-2 py-1 text-2xs font-bold text-white">
+                      ⚡ VIOLATION MOMENT
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Zoom Button */}
-              {currentFrameUri && (
+              {mediaMode === 'frames' && currentFrameUri && (
                 <button
                   onClick={() => setZoomModalImage(currentFrameUri)}
                   className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/80 px-2.5 py-1.5 text-2xs font-bold text-white shadow backdrop-blur-sm transition hover:bg-black"
@@ -196,30 +351,51 @@ export function PendingQueueWorkspace({
             </div>
 
             {/* Evidence Frame Thumbnails Selector */}
-            {frames.length > 0 && (
-              <div className="flex items-center gap-3 overflow-x-auto pb-1">
-                {frames.map((fUri, idx) => {
-                  const isSelected = selectedFrameIndex === idx;
-                  const label = idx === 0 ? 'Approach' : idx === 1 ? 'Infraction' : 'Exit Plate';
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedFrameIndex(idx)}
-                      className={`relative flex-1 overflow-hidden rounded-lg border text-left transition-all ${
-                        isSelected
-                          ? 'border-accent ring-2 ring-accent/30 shadow-md'
-                          : 'border-edge opacity-70 hover:opacity-100'
-                      }`}
-                    >
-                      <img src={fUri} alt={label} className="h-16 w-full object-cover" />
-                      <div className="bg-surface/90 px-2 py-1 text-center text-2xs font-bold text-ink">
-                        {label} (#{idx + 1})
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <div className="flex items-center gap-3 overflow-x-auto pb-1">
+              {selectedCase.videoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setMediaMode('video')}
+                  className={`relative flex-1 min-w-[90px] overflow-hidden rounded-lg border text-left transition-all ${
+                    mediaMode === 'video'
+                      ? 'border-telemetry ring-2 ring-telemetry/30 shadow-md'
+                      : 'border-edge opacity-70 hover:opacity-100'
+                  }`}
+                >
+                  <div className="flex h-16 w-full items-center justify-center bg-black/90 text-telemetry">
+                    <Play className="h-6 w-6 fill-current" />
+                  </div>
+                  <div className="bg-surface/90 px-2 py-1 text-center text-2xs font-bold text-ink">
+                    🎬 Video Clip
+                  </div>
+                </button>
+              )}
+
+              {frames.map((fUri, idx) => {
+                const isSelected = mediaMode === 'frames' && selectedFrameIndex === idx;
+                const label = idx === 0 ? 'Approach' : idx === 1 ? 'Infraction' : 'Exit Plate';
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setMediaMode('frames');
+                      setSelectedFrameIndex(idx);
+                    }}
+                    className={`relative flex-1 min-w-[90px] overflow-hidden rounded-lg border text-left transition-all ${
+                      isSelected
+                        ? 'border-accent ring-2 ring-accent/30 shadow-md'
+                        : 'border-edge opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={fUri} alt={label} className="h-16 w-full object-cover" />
+                    <div className="bg-surface/90 px-2 py-1 text-center text-2xs font-bold text-ink">
+                      {label} (#{idx + 1})
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
             {/* Geolocation & Telemetry Strip */}
             <div className="flex items-center justify-between rounded-xl border border-edge bg-surface/40 p-3 text-xs">
@@ -266,17 +442,28 @@ export function PendingQueueWorkspace({
                 {/* License Plate */}
                 <div className="flex items-center justify-between p-3">
                   <span className="text-muted">License Plate</span>
-                  <div className="flex items-center gap-2">
-                    <span className="tabular font-display font-bold text-ink">
-                      {selectedCase.citizenPlate || selectedCase.plateNumber || 'Unreadable'}
-                    </span>
-                    {selectedCase.citizenPlate ? (
-                      <span className="rounded bg-accent/15 px-1.5 py-0.5 text-2xs font-bold text-accent">
-                        CITIZEN CORRECTED
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="tabular font-display font-bold text-ink">
+                        {selectedCase.citizenPlate || selectedCase.rawPlate || 'Unidentified'}
                       </span>
-                    ) : (
-                      <span className="rounded bg-valid/15 px-1.5 py-0.5 text-2xs font-bold text-valid">
-                        AI DETECTED
+                      {selectedCase.citizenPlate ? (
+                        <span className="rounded bg-accent/15 px-1.5 py-0.5 text-2xs font-bold text-accent">
+                          CITIZEN SPECIFIED
+                        </span>
+                      ) : selectedCase.rawPlate ? (
+                        <span className="rounded bg-valid/15 px-1.5 py-0.5 text-2xs font-bold text-valid">
+                          AI DETECTED
+                        </span>
+                      ) : (
+                        <span className="rounded bg-muted/20 px-1.5 py-0.5 text-2xs font-bold text-muted">
+                          NOT DETECTED
+                        </span>
+                      )}
+                    </div>
+                    {selectedCase.citizenPlate && selectedCase.aiPlate && selectedCase.citizenPlate !== selectedCase.aiPlate && (
+                      <span className="text-2xs text-muted">
+                        (AI read: {selectedCase.aiPlate})
                       </span>
                     )}
                   </div>
@@ -285,9 +472,16 @@ export function PendingQueueWorkspace({
                 {/* Target Vehicle */}
                 <div className="flex items-center justify-between p-3">
                   <span className="text-muted">Target Vehicle</span>
-                  <span className="font-semibold text-ink">
-                    {selectedCase.citizenVehicleColor || ''} {selectedCase.citizenVehicleModel || selectedCase.citizenVehicleType || 'Vehicle Identified'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-ink">
+                      {[selectedCase.citizenVehicleColor, selectedCase.citizenVehicleModel, selectedCase.citizenVehicleType].filter(Boolean).join(' ') || 'Vehicle Details Not Provided'}
+                    </span>
+                    {(selectedCase.citizenVehicleColor || selectedCase.citizenVehicleModel || selectedCase.citizenVehicleType) && (
+                      <span className="rounded bg-accent/15 px-1.5 py-0.5 text-2xs font-bold text-accent">
+                        CITIZEN SPECIFIED
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Violation Classification */}
@@ -302,7 +496,7 @@ export function PendingQueueWorkspace({
                 <div className="flex items-center justify-between p-3">
                   <span className="text-muted">AI Clarity Confidence</span>
                   <span className="tabular font-bold text-valid">
-                    {selectedCase.clarityScore || selectedCase.confidence}% Clear
+                    {selectedCase.clarityScore !== null ? `${selectedCase.clarityScore}% Clear` : 'Visual Inspection Required'}
                   </span>
                 </div>
               </div>

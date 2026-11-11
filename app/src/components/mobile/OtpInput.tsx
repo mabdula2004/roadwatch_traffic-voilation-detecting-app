@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, TextInput, NativeSyntheticEvent, TextInputKeyPressEventData, StyleSheet } from 'react-native';
+import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { Colors } from '../../constants/theme';
 
 interface OtpInputProps {
@@ -9,7 +9,7 @@ interface OtpInputProps {
 }
 
 export function OtpInput({ length = 6, value, onChange }: OtpInputProps) {
-  const inputs = useRef<Array<TextInput | null>>([]);
+  const inputs = useRef<Array<any>>([]);
   const digits = value.padEnd(length, '').split('').slice(0, length);
 
   const handleChangeText = (text: string, index: number) => {
@@ -23,8 +23,8 @@ export function OtpInput({ length = 6, value, onChange }: OtpInputProps) {
     }
   };
 
-  const handleKeyPress = (e: NativeSyntheticEvent<TextInputKeyPressEventData>, index: number) => {
-    if (e.nativeEvent.key === 'Backspace' && !digits[index] && index > 0) {
+  const handleKeyPress = (e: any, index: number) => {
+    if (e.nativeEvent?.key === 'Backspace' && !digits[index] && index > 0) {
       inputs.current[index - 1]?.focus();
     }
   };
