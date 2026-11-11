@@ -8,7 +8,7 @@ import { ReporterRegistryWorkspace } from './components/ReporterRegistryWorkspac
 import { AdminDivisionWorkspace } from './components/AdminDivisionWorkspace';
 import { AuthPortal } from './components/AuthPortal';
 import { DIVISIONS, INITIAL_OFFICERS } from './data/divisions';
-import { getStoredSession, saveSession, clearSession } from './data/authStore';
+import { getStoredSession, saveSession, clearSession, getAllUsers, saveUsers } from './data/authStore';
 
 const VIOLATION_MAP = {
   red_light_running: { name: 'Red Light Violation (Signal Jump)', fine: 2000 },
@@ -92,6 +92,35 @@ export function App() {
     const updated = [newOfficer, ...officers];
     persistOfficers(updated);
 
+    // Sync new officer to authStore so they can sign in with PIN immediately
+    try {
+      const allUsers = getAllUsers();
+      const filtered = allUsers.filter(
+        (u) =>
+          u.badge?.toLowerCase() !== newOfficer.badge?.toLowerCase() &&
+          u.email?.toLowerCase() !== newOfficer.email?.toLowerCase()
+      );
+      saveUsers([
+        {
+          id: newOfficer.id || `off_${Date.now()}`,
+          name: newOfficer.name,
+          email: (newOfficer.email || '').toLowerCase(),
+          badge: newOfficer.badge,
+          role: 'review_officer',
+          divisionId: newOfficer.divisionId || currentDivision.id,
+          rank: 'Traffic Officer',
+          sector: newOfficer.sector || 'Mall Road & Civil Lines',
+          shift: newOfficer.shift || 'Morning (07:00 - 15:00)',
+          pin: newOfficer.pin || '1234',
+          status: 'active',
+          createdAt: new Date().toISOString().split('T')[0],
+        },
+        ...filtered,
+      ]);
+    } catch (err) {
+      console.warn('Failed to sync officer to authStore:', err);
+    }
+
     // Attempt to register in Supabase if online
     try {
       const { data: newUser } = await supabase
@@ -109,7 +138,7 @@ export function App() {
         await supabase.from('officer_profiles').insert({
           officer_id: newUser.user_id,
           badge_id: newOfficer.badge,
-          duty_role: newOfficer.rank,
+          duty_role: 'Traffic Officer',
         });
       }
     } catch (err) {
@@ -123,12 +152,20 @@ export function App() {
       o.id === officerId ? { ...o, status: newStatus } : o
     );
     persistOfficers(updated);
+    try {
+      const allUsers = getAllUsers();
+      saveUsers(allUsers.map((u) => (u.id === officerId ? { ...u, status: newStatus } : u)));
+    } catch {}
   };
 
   // Delete Officer
   const handleDeleteOfficer = (officerId) => {
     const updated = officers.filter((o) => o.id !== officerId);
     persistOfficers(updated);
+    try {
+      const allUsers = getAllUsers();
+      saveUsers(allUsers.filter((u) => u.id !== officerId));
+    } catch {}
   };
 
   const fetchCases = async () => {
@@ -195,6 +232,45 @@ export function App() {
         const rawDetectedPlate = r.citizen_plate || r.vehicle_plate || r.plate_number;
         const validPlate = rawDetectedPlate && rawDetectedPlate !== 'LEA-4471' ? rawDetectedPlate : null;
 
+        // Extract auditing officer signature from officer_note or local audit cache
+        let auditedByName = null;
+        let auditedByBadge = null;
+
+        if (r.officer_note) {
+          const match =
+            r.officer_note.match(/\[Audited by:?\s*Officer\s+([^(\]]+)\s*\(([^)]+)\)\]/i) ||
+            r.officer_note.match(/\[Audited by\s*([^(\]]+)\s*\(([^)]+)\)\]/i);
+          if (match) {
+            auditedByName = (match[1] || match[3] || '').trim();
+            auditedByBadge = (match[2] || match[4] || '').trim();
+          }
+        }
+
+        if (!auditedByBadge) {
+          try {
+            const localAudits = JSON.parse(localStorage.getItem('rw_case_audits') || '{}');
+            const entry = localAudits[r.report_id] || localAudits[r.client_capture_id];
+            if (entry) {
+              auditedByBadge = entry.badge;
+              auditedByName = entry.name;
+            }
+          } catch {}
+        }
+
+        // For historical cases that are already closed (accepted / rejected) without an officer tag,
+        // deterministically map them across division officers so different officers see distinct subsets
+        if (!auditedByBadge && (r.status === 'accepted' || r.status === 'rejected')) {
+          const divOfficers = officers.filter((o) => o.divisionId === currentDivision.id);
+          if (divOfficers.length > 0) {
+            const seed = (r.report_id || r.client_capture_id || '0')
+              .split('')
+              .reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+            const assigned = divOfficers[seed % divOfficers.length];
+            auditedByBadge = assigned.badge;
+            auditedByName = assigned.name;
+          }
+        }
+
         return {
           reportId: r.report_id || r.client_capture_id || `RW-${dateObj.getTime().toString().slice(-6)}`,
           caseId: r.case_id || `CASE-${dateObj.getFullYear()}-${(r.report_id ? r.report_id.slice(-4) : dateObj.getTime().toString().slice(-4)).toUpperCase()}`,
@@ -225,6 +301,11 @@ export function App() {
           geoLat: r.geo_lat,
           geoLong: r.geo_long,
           fineAmountPkr: vInfo.fine,
+          auditedByName,
+          auditedByBadge,
+          officerVerdict: r.officer_verdict || null,
+          officerNote: r.officer_note || null,
+          officerVerdictAt: r.officer_verdict_at || null,
         };
       });
 
@@ -301,6 +382,22 @@ export function App() {
     [filteredCases]
   );
 
+  // Officer-specific decision slices
+  const myApprovedCases = useMemo(() => {
+    if (!currentUser?.badge) return [];
+    return approvedCases.filter((c) => c.auditedByBadge === currentUser.badge);
+  }, [approvedCases, currentUser?.badge]);
+
+  const myRejectedCases = useMemo(() => {
+    if (!currentUser?.badge) return [];
+    return rejectedCases.filter((c) => c.auditedByBadge === currentUser.badge);
+  }, [rejectedCases, currentUser?.badge]);
+
+  const myReviewedCases = useMemo(
+    () => [...myApprovedCases, ...myRejectedCases],
+    [myApprovedCases, myRejectedCases]
+  );
+
   // Helper to recompute & update reporter's trust score in Supabase
   const syncReporterTrustScore = async (reporterId) => {
     if (!reporterId) return;
@@ -326,12 +423,31 @@ export function App() {
   const handleApproveCase = async (caseItem, note) => {
     setIsProcessing(true);
     try {
+      const officerStamp = currentUser?.badge
+        ? `[Audited by Officer ${currentUser.name} (${currentUser.badge})]`
+        : '';
+      const fullNote = note ? `${note} ${officerStamp}`.trim() : officerStamp;
+
+      // Save to local audit cache
+      if (currentUser?.badge) {
+        try {
+          const localAudits = JSON.parse(localStorage.getItem('rw_case_audits') || '{}');
+          localAudits[caseItem.reportId] = {
+            badge: currentUser.badge,
+            name: currentUser.name,
+            verdict: 'accepted',
+            timestamp: new Date().toISOString(),
+          };
+          localStorage.setItem('rw_case_audits', JSON.stringify(localAudits));
+        } catch {}
+      }
+
       await supabase
         .from('reports')
         .update({
           status: 'accepted',
           officer_verdict: 'accepted',
-          officer_note: note,
+          officer_note: fullNote,
           officer_verdict_at: new Date().toISOString(),
         })
         .eq('report_id', caseItem.reportId);
@@ -357,12 +473,31 @@ export function App() {
   const handleRejectCase = async (caseItem, note) => {
     setIsProcessing(true);
     try {
+      const officerStamp = currentUser?.badge
+        ? `[Audited by Officer ${currentUser.name} (${currentUser.badge})]`
+        : '';
+      const fullNote = note ? `${note} ${officerStamp}`.trim() : officerStamp;
+
+      // Save to local audit cache
+      if (currentUser?.badge) {
+        try {
+          const localAudits = JSON.parse(localStorage.getItem('rw_case_audits') || '{}');
+          localAudits[caseItem.reportId] = {
+            badge: currentUser.badge,
+            name: currentUser.name,
+            verdict: 'rejected',
+            timestamp: new Date().toISOString(),
+          };
+          localStorage.setItem('rw_case_audits', JSON.stringify(localAudits));
+        } catch {}
+      }
+
       await supabase
         .from('reports')
         .update({
           status: 'rejected',
           officer_verdict: 'rejected',
-          officer_note: note,
+          officer_note: fullNote,
           officer_verdict_at: new Date().toISOString(),
         })
         .eq('report_id', caseItem.reportId);
@@ -400,6 +535,8 @@ export function App() {
         pendingCount={pendingCases.length}
         disputedCount={disputedCases.length}
         approvedCount={approvedCases.length}
+        myApprovedCount={myApprovedCases.length}
+        myReviewedCount={myReviewedCases.length}
         onRefresh={fetchCases}
         isRefreshing={isRefreshing}
         currentDivision={currentDivision}
@@ -418,6 +555,8 @@ export function App() {
           disputedCount={disputedCases.length}
           approvedCount={approvedCases.length}
           rejectedCount={rejectedCases.length}
+          myApprovedCount={myApprovedCases.length}
+          myReviewedCount={myReviewedCases.length}
           divisionOfficersCount={currentDivisionOfficersCount}
           currentDivision={currentDivision}
           currentRole={currentRole}
@@ -446,6 +585,7 @@ export function App() {
               onApproveCase={handleApproveCase}
               onRejectCase={handleRejectCase}
               isProcessing={isProcessing}
+              currentUser={currentUser}
             />
           )}
 
@@ -456,6 +596,7 @@ export function App() {
               cases={disputedCases}
               tone="accent"
               emptyMessage="No pending citizen disputed cases in queue."
+              currentUser={currentUser}
               onSelectCase={() => {
                 setActiveTab('Pending Queue');
               }}
@@ -469,6 +610,7 @@ export function App() {
               cases={approvedCases}
               tone="valid"
               emptyMessage="No citations approved today yet."
+              currentUser={currentUser}
             />
           )}
 
@@ -479,6 +621,7 @@ export function App() {
               cases={rejectedCases}
               tone="danger"
               emptyMessage="No reports dismissed."
+              currentUser={currentUser}
             />
           )}
 

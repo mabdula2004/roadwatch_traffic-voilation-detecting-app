@@ -196,7 +196,7 @@ export async function registerOfficerAccount({
     email: cleanEmail,
     role: 'review_officer',
     divisionId: division.id,
-    rank: rank || 'Traffic Warden',
+    rank: 'Traffic Officer',
     sector: sector || division.sectors[0],
     shift: shift || 'Morning (07:00 - 15:00)',
     status: 'active',

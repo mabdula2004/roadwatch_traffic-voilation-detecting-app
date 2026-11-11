@@ -15,6 +15,8 @@ export function PortalHeader({
   pendingCount,
   disputedCount,
   approvedCount,
+  myApprovedCount,
+  myReviewedCount,
   onRefresh,
   isRefreshing,
   currentDivision,
@@ -50,7 +52,7 @@ export function PortalHeader({
                     : 'bg-valid/15 text-valid border border-valid/30'
                 }`}
               >
-                {isAdmin ? 'ADMIN COMMAND' : 'WARDEN SHIFT'}
+                {isAdmin ? 'ADMIN COMMAND' : 'OFFICER WORKSTATION'}
               </span>
             </div>
             <p className="text-2xs font-medium text-muted">
@@ -84,9 +86,17 @@ export function PortalHeader({
       <div className="flex items-center gap-3">
         {/* Metric Pills */}
         <div className="hidden lg:flex items-center gap-2">
+          {!isAdmin && myApprovedCount !== undefined && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-valid/40 bg-valid/15 px-2.5 py-1 text-2xs">
+              <span className="h-2 w-2 rounded-full bg-valid animate-pulse" />
+              <span className="font-semibold text-muted">My Approved:</span>
+              <span className="tabular font-bold text-valid">{myApprovedCount}</span>
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5 rounded-lg border border-edge bg-canvas/50 px-2.5 py-1 text-2xs">
             <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
-            <span className="font-semibold text-muted">Queue:</span>
+            <span className="font-semibold text-muted">Division Queue:</span>
             <span className="tabular font-bold text-accent">{pendingCount}</span>
           </div>
 
@@ -98,7 +108,7 @@ export function PortalHeader({
 
           <div className="flex items-center gap-1.5 rounded-lg border border-edge bg-canvas/50 px-2.5 py-1 text-2xs">
             <span className="h-2 w-2 rounded-full bg-valid" />
-            <span className="font-semibold text-muted">Approved:</span>
+            <span className="font-semibold text-muted">Total Approved:</span>
             <span className="tabular font-bold text-valid">{approvedCount}</span>
           </div>
         </div>
@@ -139,7 +149,7 @@ export function PortalHeader({
         {/* Secure Sign Out / End Shift (NO SWITCH PORTAL BUTTON!) */}
         <button
           onClick={onLogout}
-          title={isAdmin ? 'Exit Admin Command & Sign Out' : 'End Warden Shift & Sign Out'}
+          title={isAdmin ? 'Exit Admin Command & Sign Out' : 'End Officer Shift & Sign Out'}
           className="flex items-center gap-1.5 rounded-lg border border-edge bg-surface/80 px-2.5 py-1.5 text-2xs font-bold text-muted transition hover:border-signal/40 hover:bg-signal/10 hover:text-signal"
         >
           <LogOut className="h-3.5 w-3.5" />

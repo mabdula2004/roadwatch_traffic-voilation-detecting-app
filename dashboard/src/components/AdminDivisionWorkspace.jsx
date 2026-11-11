@@ -44,7 +44,7 @@ export function AdminDivisionWorkspace({
 
   // New Officer Form State
   const [formName, setFormName] = useState('');
-  const [formRank, setFormRank] = useState('Inspector (Senior Audit Warden)');
+  const [formRank, setFormRank] = useState('Traffic Officer');
   const [formBadge, setFormBadge] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
@@ -64,8 +64,7 @@ export function AdminDivisionWorkspace({
       const matchesSearch =
         off.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         off.badge.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (off.sector && off.sector.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        off.rank.toLowerCase().includes(searchQuery.toLowerCase());
+        (off.sector && off.sector.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesStatus =
         statusFilter === 'all' ? true : off.status === statusFilter;
@@ -100,7 +99,7 @@ export function AdminDivisionWorkspace({
     setFormName('');
     setFormEmail('');
     setFormPhone('+92 300 ');
-    setFormRank('Inspector (Senior Audit Warden)');
+    setFormRank('Traffic Officer');
     setFormSector(currentDivision.sectors[0] || 'General Enforcement Sector');
     setFormShift('Morning (07:00 - 15:00)');
     setFormStatus('active');
@@ -119,7 +118,7 @@ export function AdminDivisionWorkspace({
       divisionId: currentDivision.id,
       badge: formBadge.trim().toUpperCase(),
       name: formName.trim(),
-      rank: formRank,
+      rank: 'Traffic Officer',
       email: formEmail.trim() || `${formBadge.toLowerCase().replace('-', '')}@traffic.punjab.gov.pk`,
       phone: formPhone.trim() || '+92 300 0000000',
       sector: formSector,
@@ -300,7 +299,7 @@ export function AdminDivisionWorkspace({
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="font-display text-base font-bold text-ink">
-              Roster of Review Officers & Wardens
+              Division Enforcement Officers Roster
             </h2>
             <p className="text-xs text-muted">
               All certified review personnel reporting to {currentDivision.admin.name}.
@@ -382,7 +381,7 @@ export function AdminDivisionWorkspace({
               <thead>
                 <tr className="border-b border-edge bg-surface/80 text-[11px] font-bold uppercase tracking-wider text-muted">
                   <th className="py-3 pl-5 pr-3">Officer Details</th>
-                  <th className="py-3 px-3">Rank & Credentials</th>
+                  <th className="py-3 px-3">Role & Credentials</th>
                   <th className="py-3 px-3">Assigned Sector / Beat</th>
                   <th className="py-3 px-3">Shift</th>
                   <th className="py-3 px-3">Duty Status</th>
@@ -427,10 +426,12 @@ export function AdminDivisionWorkspace({
                         </div>
                       </td>
 
-                      {/* Rank */}
+                      {/* Role & Credentials */}
                       <td className="py-3.5 px-3">
-                        <span className="font-medium text-ink/90">{officer.rank}</span>
-                        <div className="text-2xs text-muted">PIN: **** (Protected)</div>
+                        <span className="rounded border border-telemetry/30 bg-telemetry/10 px-2 py-0.5 text-2xs font-bold text-telemetry">
+                          Officer
+                        </span>
+                        <div className="text-2xs text-muted mt-1">PIN: **** (Protected)</div>
                       </td>
 
                       {/* Sector */}
@@ -596,7 +597,7 @@ export function AdminDivisionWorkspace({
             </div>
 
             <form onSubmit={handleSubmitNewOfficer} className="mt-5 space-y-4">
-              {/* Full Name & Rank */}
+              {/* Full Name & Role */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="text-2xs font-bold uppercase tracking-wider text-muted">
@@ -607,26 +608,18 @@ export function AdminDivisionWorkspace({
                     required
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
-                    placeholder="e.g. Insp. Tariq Mehmood"
+                    placeholder="e.g. Tariq Mehmood"
                     className="mt-1 w-full rounded-lg border border-edge bg-canvas/80 px-3 py-2 text-xs text-ink placeholder-muted focus:border-accent focus:outline-none"
                   />
                 </div>
 
                 <div>
                   <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                    Rank / Role *
+                    Duty Role
                   </label>
-                  <select
-                    value={formRank}
-                    onChange={(e) => setFormRank(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-edge bg-canvas/80 px-3 py-2 text-xs text-ink focus:border-accent focus:outline-none"
-                  >
-                    <option value="Inspector (Senior Audit Warden)">Inspector (Senior Audit Warden)</option>
-                    <option value="Sub-Inspector">Sub-Inspector</option>
-                    <option value="Senior Traffic Warden">Senior Traffic Warden</option>
-                    <option value="Traffic Warden">Traffic Warden</option>
-                    <option value="Inspector (Video Evidence Analyst)">Inspector (Evidence Analyst)</option>
-                  </select>
+                  <div className="mt-1 flex items-center h-[34px] rounded-lg border border-edge bg-canvas/40 px-3 py-2 text-xs font-semibold text-telemetry">
+                    Traffic Officer
+                  </div>
                 </div>
               </div>
 

@@ -80,7 +80,7 @@ export function ReportOutcome({
   // Wallet & Manual Review State
   const [walletBalance, setWalletBalance] = useState<number>(500);
   const [selectedZoomIndex, setSelectedZoomIndex] = useState<number | null>(null);
-  const lightboxScrollRef = useRef<ScrollView>(null);
+  const lightboxScrollRef = useRef<any>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);

@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -29,6 +31,10 @@ import {
   Filter,
   ChevronDown,
   ChevronUp,
+  Zap,
+  Lock,
+  ExternalLink,
+  Check,
 } from 'lucide-react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -41,6 +47,7 @@ import {
   WalletState,
   WalletTransaction,
 } from '../../lib/wallet';
+import { launchStripeWalletTopUp } from '../../lib/stripe';
 import {
   getPenaltyCitations,
   getLocalReports,
@@ -174,7 +181,7 @@ function buildSynthesizedTransactions(
     }
   }
 
-  // 3. Synthesize from remote reward notifications directly
+  // 3. Synthesize from remote reward & top-up notifications directly
   if (notifications && notifications.length > 0) {
     for (const notif of notifications) {
       if (notif.type === 'reward_payout') {
@@ -192,6 +199,26 @@ function buildSynthesizedTransactions(
             amount: 300,
             title: isUrdu ? 'وارڈن تصدیق شدہ انعام و فیس ریفنڈ' : 'Warden Confirmed Bounty & Fee Refund',
             subtitle: notif.message || (isUrdu ? 'ٹریفک خلاف ورزی پر تصدیق شدہ انعام' : 'Verified traffic violation bounty payout'),
+            timestamp: notif.sent_at || new Date().toISOString(),
+          });
+        }
+      } else if (notif.type === 'top_up') {
+        const notifId = notif.notification_id || notif.id;
+        const key = `topup_notif_${notifId}`;
+        const notifTime = new Date(notif.sent_at).getTime();
+        const alreadyHasCloseTopUp = result.some(
+          t => t.type === 'top_up' && Math.abs(new Date(t.timestamp).getTime() - notifTime) < 120000
+        );
+        if (!existingKeys.has(key) && !alreadyHasCloseTopUp) {
+          existingKeys.add(key);
+          const matchAmount = notif.message?.match(/PKR\s*([\d,]+)/i);
+          const parsedAmount = matchAmount ? parseInt(matchAmount[1].replace(/,/g, ''), 10) : 500;
+          result.push({
+            id: `TX-TOP-${String(notifId).slice(-6)}`,
+            type: 'top_up',
+            amount: parsedAmount || 500,
+            title: isUrdu ? 'والیٹ ریچارج (سٹرائپ)' : 'Wallet Top-Up (Stripe)',
+            subtitle: notif.message || (isUrdu ? 'سٹرائپ کارڈ پیمنٹ کے ذریعے بیلنس شامل کیا گیا' : 'Card / Apple Pay Top-Up via Stripe'),
             timestamp: notif.sent_at || new Date().toISOString(),
           });
         }
@@ -228,16 +255,29 @@ export function Wallet({ onSelectFine }: WalletProps) {
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Stripe Payment Integration States
+  const [stripeModalVisible, setStripeModalVisible] = useState(false);
+  const [selectedTopUpAmount, setSelectedTopUpAmount] = useState<number>(500);
+  const [customAmountStr, setCustomAmountStr] = useState<string>('');
+  const [isProcessingStripe, setIsProcessingStripe] = useState(false);
+  const [stripeSuccessModal, setStripeSuccessModal] = useState<{
+    visible: boolean;
+    amount: number;
+    newBalance: number;
+    sessionId?: string;
+  } | null>(null);
+
   const loadData = useCallback(async () => {
     try {
       const { data: auth } = await supabase.auth.getUser();
       const currentUserId = auth?.user?.id;
 
-      // 1. Fetch remote reports and notifications to capture live officer verdicts & rewards
+      // 1. Fetch remote reports, notifications, and wallet balance directly
       let remoteReports: any[] = [];
       let remoteNotifs: any[] = [];
+      let remoteWalletData: any = null;
       if (currentUserId) {
-        const [repRes, notifRes] = await Promise.all([
+        const [repRes, notifRes, walletRes] = await Promise.all([
           supabase
             .from('reports')
             .select('report_id,client_capture_id,claimed_class,captured_at,uploaded_at,status,location_name,officer_verdict,officer_note,officer_verdict_at')
@@ -246,10 +286,16 @@ export function Wallet({ onSelectFine }: WalletProps) {
             .from('notifications')
             .select('*')
             .eq('recipient_id', currentUserId)
-            .eq('type', 'reward_payout'),
+            .in('type', ['reward_payout', 'top_up']),
+          supabase
+            .from('reward_wallets')
+            .select('balance, pending_clearance, epay_linked')
+            .eq('reporter_id', currentUserId)
+            .maybeSingle(),
         ]);
         if (repRes.data) remoteReports = repRes.data;
         if (notifRes.data) remoteNotifs = notifRes.data;
+        if (walletRes.data) remoteWalletData = walletRes.data;
       }
 
       const [walletState, penaltyList, storedTxList, localRepList] = await Promise.all([
@@ -258,6 +304,12 @@ export function Wallet({ onSelectFine }: WalletProps) {
         getStoredTransactions(),
         getLocalReports(),
       ]);
+
+      if (remoteWalletData) {
+        walletState.balance = Number(remoteWalletData.balance ?? walletState.balance);
+        walletState.pending_clearance = Number(remoteWalletData.pending_clearance ?? walletState.pending_clearance);
+        walletState.epay_linked = Boolean(remoteWalletData.epay_linked ?? walletState.epay_linked);
+      }
 
       // Merge local and remote reports so officer payouts appear immediately
       const mergedReports = [...localRepList];
@@ -395,30 +447,64 @@ export function Wallet({ onSelectFine }: WalletProps) {
     };
   }, [loadData]);
 
-  const handleTopUp = async (amount: number) => {
-    Alert.alert(
-      isUrdu ? 'والیٹ ریچارج' : 'Top-Up Wallet',
-      isUrdu
-        ? `کیا آپ واقعی اپنے والیٹ میں PKR ${amount.toLocaleString()} کا بیلنس شامل کرنا چاہتے ہیں؟`
-        : `Are you sure you want to recharge PKR ${amount.toLocaleString()} into your wallet?`,
-      [
-        { text: isUrdu ? 'منسوخ کریں' : 'Cancel', style: 'cancel' },
-        {
-          text: isUrdu ? 'ریچارج کریں' : 'Confirm Recharge',
-          onPress: async () => {
-            const res = await rechargeWalletBalance(amount, {
-              title: isUrdu ? 'والیٹ ٹاپ اپ (ای پے)' : 'Wallet Top-Up (ePay)',
-              subtitle: isUrdu ? 'منسلک ای پے اکاؤنٹ سے بیلنس ریچارج' : 'Direct balance credit via linked ePay',
-              type: 'top_up',
-            });
-            if (res.success) {
-              setWallet(prev => prev ? { ...prev, balance: res.newBalance } : { balance: res.newBalance, pending_clearance: 0, epay_linked: true });
-              void loadData();
-            }
-          },
-        },
-      ]
-    );
+  const handleTopUp = (amount: number) => {
+    setSelectedTopUpAmount(amount);
+    setCustomAmountStr('');
+    setStripeModalVisible(true);
+  };
+
+  const handleStripeCheckout = async (amount: number) => {
+    if (!amount || amount < 50) {
+      Alert.alert(
+        isUrdu ? 'غلط رقم' : 'Invalid Amount',
+        isUrdu ? 'کم از کم ریچارج کی رقم PKR 50 ہے۔' : 'Minimum top-up amount is PKR 50.'
+      );
+      return;
+    }
+
+    setIsProcessingStripe(true);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUserId = authData?.user?.id;
+      const customerEmail = profile?.email || authData?.user?.email;
+
+      const res = await launchStripeWalletTopUp({
+        amountPkr: amount,
+        reporterId: currentUserId || undefined,
+        customerEmail,
+      });
+
+      if (res.success) {
+        setStripeModalVisible(false);
+        setCustomAmountStr('');
+        setWallet(prev =>
+          prev
+            ? { ...prev, balance: res.newBalance ?? prev.balance + amount, epay_linked: true }
+            : { balance: res.newBalance ?? amount, pending_clearance: 0, epay_linked: true }
+        );
+        setStripeSuccessModal({
+          visible: true,
+          amount: res.amountPkr || amount,
+          newBalance: res.newBalance ?? ((wallet?.balance ?? 0) + amount),
+          sessionId: res.sessionId,
+        });
+        void loadData();
+      } else if (res.cancelled) {
+        // User dismissed the checkout sheet; keep modal ready if they wish to retry
+      } else if (res.error) {
+        Alert.alert(
+          isUrdu ? 'ادائیگی نامکمل' : 'Payment Incomplete',
+          res.error
+        );
+      }
+    } catch (err: any) {
+      Alert.alert(
+        isUrdu ? 'خرابی' : 'Error',
+        err.message || 'Payment initiation failed.'
+      );
+    } finally {
+      setIsProcessingStripe(false);
+    }
   };
 
   const filteredTransactions = useMemo(() => {
@@ -510,41 +596,30 @@ export function Wallet({ onSelectFine }: WalletProps) {
             {wallet ? `PKR ${(wallet.pending_clearance ?? 0).toLocaleString()} ${t('pendingClearance')}` : t('loadingWallet')}
           </Text>
 
-          {/* Quick Test Top Up Buttons */}
-          <View style={{ marginTop: 14 }}>
-            <Text style={{ fontSize: 10, fontWeight: '800', color: colors.muted, letterSpacing: 0.6, marginBottom: 8, textTransform: 'uppercase' }}>
-              {t('quickRecharge')}
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity
-                style={[styles.topUpBtn, { backgroundColor: colors.canvas, borderColor: colors.edge }]}
-                onPress={() => handleTopUp(100)}
-                activeOpacity={0.7}
-              >
-                <PlusCircle size={13} color={colors.telemetry} />
-                <Text style={[styles.topUpBtnText, { color: colors.ink }]}>+PKR 100</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.topUpBtn, { backgroundColor: colors.canvas, borderColor: colors.edge }]}
-                onPress={() => handleTopUp(500)}
-                activeOpacity={0.7}
-              >
-                <PlusCircle size={13} color={colors.telemetry} />
-                <Text style={[styles.topUpBtnText, { color: colors.ink }]}>+PKR 500</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.topUpBtn, { backgroundColor: colors.canvas, borderColor: colors.edge }]}
-                onPress={() => handleTopUp(1000)}
-                activeOpacity={0.7}
-              >
-                <PlusCircle size={13} color={colors.telemetry} />
-                <Text style={[styles.topUpBtnText, { color: colors.ink }]}>+PKR 1,000</Text>
-              </TouchableOpacity>
+          {/* Primary Stripe Top Up Trigger */}
+          <TouchableOpacity
+            style={[styles.stripeMainBtn, { backgroundColor: '#635BFF' }]}
+            onPress={() => {
+              setSelectedTopUpAmount(500);
+              setCustomAmountStr('');
+              setStripeModalVisible(true);
+            }}
+            activeOpacity={0.85}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <CreditCard size={16} color="#ffffff" />
+              <Text style={styles.stripeMainBtnText}>
+                {isUrdu ? 'والیٹ ریچارج کریں (سٹرائپ)' : 'Top Up Wallet via Stripe'}
+              </Text>
             </View>
-          </View>
+            <View style={styles.stripePillBadge}>
+              <Lock size={10} color="#635BFF" />
+              <Text style={styles.stripePillText}>256-BIT SSL</Text>
+            </View>
+          </TouchableOpacity>
 
           {/* Withdrawal status button */}
-          <TouchableOpacity style={[styles.withdrawBtn, { backgroundColor: colors.accent, opacity: 0.6, marginTop: 14 }]} disabled activeOpacity={0.85}>
+          <TouchableOpacity style={[styles.withdrawBtn, { backgroundColor: colors.accent, opacity: 0.6, marginTop: 12 }]} disabled activeOpacity={0.85}>
             <Text style={[styles.withdrawText, { color: colors.canvas }]}>{t('withdrawUnavailable')}</Text>
             <ArrowUpRight size={16} color={colors.canvas} />
           </TouchableOpacity>
@@ -1013,6 +1088,211 @@ export function Wallet({ onSelectFine }: WalletProps) {
           </Text>
         )}
       </ScrollView>
+
+      {/* STRIPE PAYMENT MODAL */}
+      <Modal
+        visible={stripeModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!isProcessingStripe) setStripeModalVisible(false);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.stripeModalCard, { backgroundColor: colors.surface, borderColor: colors.edge }]}>
+            {/* Modal Header */}
+            <View style={styles.stripeModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={[styles.stripeIconBox, { backgroundColor: '#635BFF' }]}>
+                  <CreditCard size={18} color="#ffffff" />
+                </View>
+                <View>
+                  <Text style={[styles.stripeModalTitle, { color: colors.ink }]}>
+                    {isUrdu ? 'والیٹ ریچارج (سٹرائپ)' : 'Recharge Wallet via Stripe'}
+                  </Text>
+                  <Text style={[styles.stripeModalSub, { color: colors.muted }]}>
+                    {isUrdu ? 'محفوظ آن لائن پیمنٹ گیٹ وے' : 'Official Encrypted Payment Gateway'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setStripeModalVisible(false)}
+                disabled={isProcessingStripe}
+                style={styles.modalCloseBtn}
+              >
+                <Text style={{ color: colors.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Sandbox info banner */}
+            <View style={[styles.sandboxBanner, { backgroundColor: 'rgba(99, 91, 255, 0.12)', borderColor: 'rgba(99, 91, 255, 0.3)' }]}>
+              <Zap size={14} color="#635BFF" />
+              <Text style={styles.sandboxBannerText}>
+                {isUrdu
+                  ? 'سٹرائپ ٹیسٹ موڈ فعال ہے: کارڈ، ایپل پے، گوگل پے سپورٹڈ'
+                  : 'Stripe Sandbox Active · Visa, Mastercard, Apple Pay, Google Pay'}
+              </Text>
+            </View>
+
+            {/* Amount Selection Chips */}
+            <Text style={[styles.sectionLabel, { color: colors.muted }]}>
+              {isUrdu ? 'رقم منتخب کریں' : 'SELECT RECHARGE AMOUNT'}
+            </Text>
+            <View style={styles.amountChipsRow}>
+              {[500, 1000, 2500, 5000].map((amt) => {
+                const isSelected = selectedTopUpAmount === amt && !customAmountStr;
+                return (
+                  <TouchableOpacity
+                    key={amt}
+                    style={[
+                      styles.amountChip,
+                      {
+                        backgroundColor: isSelected ? '#635BFF' : colors.canvas,
+                        borderColor: isSelected ? '#635BFF' : colors.edge,
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedTopUpAmount(amt);
+                      setCustomAmountStr('');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.amountChipText,
+                        { color: isSelected ? '#ffffff' : colors.ink },
+                      ]}
+                    >
+                      PKR {amt.toLocaleString()}
+                    </Text>
+                    {isSelected && <Check size={12} color="#ffffff" style={{ marginLeft: 3 }} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Custom Amount Input */}
+            <View style={{ marginTop: 12 }}>
+              <Text style={[styles.inputLabel, { color: colors.muted }]}>
+                {isUrdu ? 'یا کسٹم رقم درج کریں (کم از کم PKR 50):' : 'Or enter custom amount (Min PKR 50):'}
+              </Text>
+              <View style={[styles.customInputRow, { backgroundColor: colors.canvas, borderColor: customAmountStr ? '#635BFF' : colors.edge }]}>
+                <Text style={[styles.currencyPrefix, { color: colors.muted }]}>PKR</Text>
+                <TextInput
+                  style={[styles.customInput, { color: colors.ink }]}
+                  placeholder="e.g. 1500"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="number-pad"
+                  value={customAmountStr}
+                  onChangeText={(val) => {
+                    const clean = val.replace(/[^0-9]/g, '');
+                    setCustomAmountStr(clean);
+                    if (clean) setSelectedTopUpAmount(Number(clean));
+                  }}
+                />
+              </View>
+            </View>
+
+            {/* Security info */}
+            <View style={styles.securityRow}>
+              <ShieldCheck size={14} color={colors.valid} />
+              <Text style={[styles.securityText, { color: colors.muted }]}>
+                256-Bit SSL Encrypted · PCI-DSS Level 1 Security
+              </Text>
+            </View>
+
+            {/* Pay Button */}
+            <TouchableOpacity
+              style={[
+                styles.stripeCheckoutSubmitBtn,
+                { backgroundColor: isProcessingStripe ? '#818CF8' : '#635BFF' },
+              ]}
+              onPress={() => {
+                const finalAmount = customAmountStr ? Number(customAmountStr) : selectedTopUpAmount;
+                void handleStripeCheckout(finalAmount);
+              }}
+              disabled={isProcessingStripe}
+              activeOpacity={0.85}
+            >
+              {isProcessingStripe ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator size="small" color="#ffffff" />
+                  <Text style={styles.stripeCheckoutSubmitText}>
+                    {isUrdu ? 'سٹرائپ چیک آؤٹ لوڈ ہو رہا ہے...' : 'Launching Stripe Checkout...'}
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Lock size={15} color="#ffffff" />
+                  <Text style={styles.stripeCheckoutSubmitText}>
+                    {isUrdu
+                      ? `PKR ${(customAmountStr ? Number(customAmountStr) : selectedTopUpAmount).toLocaleString()} سٹرائپ سے ادا کریں`
+                      : `Pay PKR ${(customAmountStr ? Number(customAmountStr) : selectedTopUpAmount).toLocaleString()} with Stripe`}
+                  </Text>
+                  <ExternalLink size={14} color="#ffffff" style={{ marginLeft: 4 }} />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* STRIPE SUCCESS CELEBRATION MODAL */}
+      <Modal
+        visible={Boolean(stripeSuccessModal?.visible)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStripeSuccessModal(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.successModalCard, { backgroundColor: colors.surface, borderColor: 'rgba(16, 185, 129, 0.4)' }]}>
+            <View style={[styles.successIconBadge, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+              <CheckCircle2 size={42} color={colors.valid} />
+            </View>
+            <Text style={[styles.successTitle, { color: colors.ink }]}>
+              {isUrdu ? 'ادائیگی کامیاب!' : 'Payment Confirmed!'}
+            </Text>
+            <Text style={[styles.successSub, { color: colors.muted }]}>
+              {isUrdu
+                ? 'آپ کے روڈ واچ والیٹ میں رقم کامیابی سے جمع کر دی گئی ہے۔'
+                : 'Your RoadWatch citizen wallet has been instantly credited via Stripe.'}
+            </Text>
+
+            <View style={[styles.successDetailsBox, { backgroundColor: colors.canvas, borderColor: colors.edge }]}>
+              <View style={styles.successRow}>
+                <Text style={[styles.successLabel, { color: colors.muted }]}>Amount Added:</Text>
+                <Text style={[styles.successVal, { color: colors.valid }]}>
+                  +PKR {(stripeSuccessModal?.amount ?? 0).toLocaleString()}
+                </Text>
+              </View>
+              <View style={styles.successRow}>
+                <Text style={[styles.successLabel, { color: colors.muted }]}>New Balance:</Text>
+                <Text style={[styles.successVal, { color: colors.ink }]}>
+                  PKR {(stripeSuccessModal?.newBalance ?? 0).toLocaleString()}
+                </Text>
+              </View>
+              {stripeSuccessModal?.sessionId && (
+                <View style={styles.successRow}>
+                  <Text style={[styles.successLabel, { color: colors.muted }]}>Gateway Ref:</Text>
+                  <Text style={[styles.successVal, { color: colors.muted, fontSize: 10 }]}>
+                    {stripeSuccessModal.sessionId.slice(-12).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.successDoneBtn, { backgroundColor: colors.valid }]}
+              onPress={() => setStripeSuccessModal(null)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.successDoneText}>
+                {isUrdu ? 'ٹھیک ہے' : 'Done & Return to Wallet'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1387,5 +1667,237 @@ const styles = StyleSheet.create({
   showMoreText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  stripeMainBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginTop: 14,
+    shadowColor: '#635BFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  stripeMainBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  stripePillBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  stripePillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#635BFF',
+    letterSpacing: 0.5,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
+  },
+  stripeModalCard: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 22,
+    paddingBottom: 36,
+    borderWidth: 1,
+  },
+  stripeModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  stripeIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stripeModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  stripeModalSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+  },
+  sandboxBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  sandboxBannerText: {
+    fontSize: 11,
+    color: '#635BFF',
+    fontWeight: '600',
+    flex: 1,
+  },
+  sectionLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  amountChipsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  amountChip: {
+    flex: 1,
+    minWidth: '45%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  amountChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  customInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+  },
+  currencyPrefix: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginRight: 8,
+  },
+  customInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  securityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
+    marginBottom: 16,
+    justifyContent: 'center',
+  },
+  securityText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  stripeCheckoutSubmitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 14,
+    shadowColor: '#635BFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  stripeCheckoutSubmitText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  successModalCard: {
+    margin: 24,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    alignSelf: 'center',
+    width: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  successIconBadge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  successSub: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 18,
+  },
+  successDetailsBox: {
+    width: '100%',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    gap: 8,
+    marginBottom: 20,
+  },
+  successRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  successLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  successVal: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  successDoneBtn: {
+    width: '100%',
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successDoneText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

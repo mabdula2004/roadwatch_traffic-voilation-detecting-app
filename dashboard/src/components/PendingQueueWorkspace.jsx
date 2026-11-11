@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -15,18 +15,50 @@ import {
 import { Badge } from './ui/Badge';
 
 export function PendingQueueWorkspace({
-  cases,
+  cases = [],
   onApproveCase,
   onRejectCase,
   isProcessing,
+  currentUser,
 }) {
-  const [selectedCaseId, setSelectedCaseId] = useState(cases[0]?.reportId || '');
+  const officerSector = currentUser?.sector || '';
+
+  // Filter cases assigned to current officer's sector/beat
+  const sectorCases = useMemo(() => {
+    if (!officerSector) return cases;
+    const words = officerSector
+      .split('&')
+      .map((w) => w.trim().toLowerCase())
+      .flatMap((w) => w.split(' '))
+      .filter((w) => w.length > 3);
+
+    const matched = cases.filter((c) => {
+      const loc = (c.locationName || '').toLowerCase();
+      return words.some((w) => loc.includes(w));
+    });
+
+    if (matched.length > 0) return matched;
+    // Partition queue among officers if exact text match isn't present
+    const badgeNum = parseInt(currentUser?.badge?.replace(/\D/g, '') || '0', 10);
+    const subset = cases.filter((_, idx) => idx % 2 === (badgeNum % 2));
+    return subset.length > 0 ? subset : cases;
+  }, [cases, officerSector, currentUser?.badge]);
+
+  const [queueFilter, setQueueFilter] = useState('all'); // 'sector' | 'all'
+
+  const displayedCases = queueFilter === 'sector' ? sectorCases : cases;
+
+  const [selectedCaseId, setSelectedCaseId] = useState(displayedCases[0]?.reportId || cases[0]?.reportId || '');
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [mediaMode, setMediaMode] = useState('frames'); // 'frames' | 'video'
   const [officerNote, setOfficerNote] = useState('');
   const [zoomModalImage, setZoomModalImage] = useState(null);
 
-  const selectedCase = cases.find((c) => c.reportId === selectedCaseId) || cases[0];
+  const selectedCase =
+    displayedCases.find((c) => c.reportId === selectedCaseId) ||
+    cases.find((c) => c.reportId === selectedCaseId) ||
+    displayedCases[0] ||
+    cases[0];
 
   const handleApprove = async () => {
     if (!selectedCase) return;
@@ -51,8 +83,19 @@ export function PendingQueueWorkspace({
             Audit Queue Cleared
           </h3>
           <p className="mt-1 text-xs text-muted">
-            There are currently no pending violation reports requiring officer audit in this queue. New reports will appear live as submitted by citizens.
+            {queueFilter === 'sector'
+              ? `No pending cases in your assigned sector (${officerSector}). Switch to "All Division" to inspect global cases.`
+              : 'There are currently no pending violation reports requiring officer audit in this queue.'}
           </p>
+          {queueFilter === 'sector' && (
+            <button
+              type="button"
+              onClick={() => setQueueFilter('all')}
+              className="mt-3 inline-flex items-center gap-1 rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs font-semibold text-telemetry hover:border-telemetry"
+            >
+              View All Division Queue ({cases.length})
+            </button>
+          )}
         </div>
       </div>
     );
@@ -67,15 +110,48 @@ export function PendingQueueWorkspace({
           LEFT COLUMN: Live Pending Cases Queue (320px)
          ========================================================================= */}
       <div className="thin-scroll flex w-80 shrink-0 flex-col border-r border-edge bg-canvas/60 overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-edge bg-surface/90 px-4 py-3 backdrop-blur-md">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
-            Pending Cases ({cases.length})
-          </p>
-          <span className="text-[10px] font-semibold text-telemetry">Priority Audit</span>
+        <div className="sticky top-0 z-10 border-b border-edge bg-surface/95 px-3 py-2.5 backdrop-blur-md space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+              Pending Queue ({displayedCases.length})
+            </p>
+            <span className="text-[10px] font-semibold text-telemetry">
+              {currentUser?.badge ? `Officer ${currentUser.badge}` : 'Queue'}
+            </span>
+          </div>
+
+          {/* Sector vs Division Queue Switcher */}
+          {officerSector ? (
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-edge bg-canvas/70 p-0.5 text-2xs">
+              <button
+                type="button"
+                onClick={() => setQueueFilter('sector')}
+                className={`truncate rounded px-2 py-1 font-semibold transition ${
+                  queueFilter === 'sector'
+                    ? 'bg-telemetry text-black font-bold shadow-sm'
+                    : 'text-muted hover:text-ink'
+                }`}
+                title={`My Sector: ${officerSector}`}
+              >
+                My Sector ({sectorCases.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setQueueFilter('all')}
+                className={`truncate rounded px-2 py-1 font-semibold transition ${
+                  queueFilter === 'all'
+                    ? 'bg-telemetry text-black font-bold shadow-sm'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                All Division ({cases.length})
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="divide-y divide-edge/60">
-          {cases.map((c) => {
+          {displayedCases.map((c) => {
             const isSelected = c.reportId === selectedCase.reportId;
             return (
               <button

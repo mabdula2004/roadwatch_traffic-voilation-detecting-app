@@ -26,14 +26,22 @@
     "scheme": "roadwatch",
     "plugins": [
       "expo-video",
-      ["expo-camera", {
-        "cameraPermission": "Allow RoadWatch to record traffic evidence",
-        "microphonePermission": "Allow RoadWatch to capture audio with traffic evidence",
-        "recordAudioAndroid": true
-      }],
-      ["expo-location", {
-        "locationWhenInUsePermission": "Allow RoadWatch to attach location to traffic evidence"
-      }]
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow RoadWatch to record traffic evidence",
+          "microphonePermission": "Allow RoadWatch to capture audio with traffic evidence",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow RoadWatch to attach location to traffic evidence"
+        }
+      ],
+      "expo-web-browser",
+      "expo-status-bar"
     ]
   }
 }

@@ -16,8 +16,7 @@ import {
   CheckCircle2,
   MapPin,
 } from 'lucide-react';
-import { DIVISIONS } from '../data/divisions';
-import { authenticateUser, registerAdminAccount, registerOfficerAccount } from '../data/authStore';
+import { authenticateUser, registerAdminAccount } from '../data/authStore';
 
 export function AuthPortal({ onLoginSuccess }) {
   // Selected Portal: 'admin' | 'officer'
@@ -32,7 +31,7 @@ export function AuthPortal({ onLoginSuccess }) {
   const [badge, setBadge] = useState('');
   const [email, setEmail] = useState('');
   const [divisionId, setDivisionId] = useState('lahore_div');
-  const [rank, setRank] = useState('Traffic Warden');
+  const [rank, setRank] = useState('Traffic Officer');
   const [sector, setSector] = useState('Mall Road & Civil Lines');
 
   const [isLoading, setIsLoading] = useState(false);
@@ -102,34 +101,6 @@ export function AuthPortal({ onLoginSuccess }) {
     }
   };
 
-  const handleOfficerRegisterSubmit = async (e) => {
-    e.preventDefault();
-    setErrorMessage('');
-    setIsLoading(true);
-
-    try {
-      if (!name.trim() || !email.trim() || !badge.trim()) {
-        throw new Error('Please fill in officer name, badge ID, and email.');
-      }
-
-      const newOfficer = await registerOfficerAccount({
-        name,
-        badge,
-        email,
-        divisionId,
-        rank,
-        sector,
-        pin: pin || '1234',
-      });
-
-      onLoginSuccess(newOfficer);
-    } catch (err) {
-      setErrorMessage(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Quick 1-Click Fast Logins for testing
   const handleQuickLogin = (emailOrBadge, defaultPin, role) => {
     setErrorMessage('');
@@ -188,7 +159,7 @@ export function AuthPortal({ onLoginSuccess }) {
                       : 'bg-telemetry/15 text-telemetry border border-telemetry/30'
                   }`}
                 >
-                  {isAdminPortal ? 'ADMINISTRATIVE ACCESS' : 'WARDEN ACCESS'}
+                  {isAdminPortal ? 'ADMINISTRATIVE ACCESS' : 'OFFICER WORKSTATION'}
                 </span>
               </div>
               <p className="text-2xs text-muted">
@@ -237,53 +208,53 @@ export function AuthPortal({ onLoginSuccess }) {
                   ? mode === 'login'
                     ? 'Division Administrator Sign-In'
                     : 'Register as Division Administrator'
-                  : mode === 'login'
-                  ? 'Traffic Review Officer Sign-In'
-                  : 'Register New Officer Badge'}
+                  : 'Traffic Review Officer Sign-In'}
               </h2>
               <p className="text-2xs text-muted mt-0.5">
                 {isAdminPortal
-                  ? 'High-command portal: manage wardens and oversee division enforcement'
+                  ? 'High-command portal: manage officers and oversee division enforcement'
                   : 'Duty station portal: audit camera captures and verify citizen disputes'}
               </p>
             </div>
 
-            {/* Login / Register Toggle */}
-            <div className="flex items-center rounded-lg border border-edge bg-canvas/60 p-0.5 text-2xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  setErrorMessage('');
-                }}
-                className={`rounded px-2.5 py-1 font-semibold transition ${
-                  mode === 'login'
-                    ? isAdminPortal
+            {/* Mode Indicator & Admin Register Toggle */}
+            {isAdminPortal ? (
+              <div className="flex items-center rounded-lg border border-edge bg-canvas/60 p-0.5 text-2xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setErrorMessage('');
+                  }}
+                  className={`rounded px-2.5 py-1 font-semibold transition ${
+                    mode === 'login'
                       ? 'bg-accent/20 text-accent'
-                      : 'bg-telemetry/20 text-telemetry'
-                    : 'text-muted hover:text-ink'
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('register');
-                  setErrorMessage('');
-                  if (!isAdminPortal) handleGenerateBadge();
-                }}
-                className={`rounded px-2.5 py-1 font-semibold transition ${
-                  mode === 'register'
-                    ? isAdminPortal
+                      : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('register');
+                    setErrorMessage('');
+                  }}
+                  className={`rounded px-2.5 py-1 font-semibold transition ${
+                    mode === 'register'
                       ? 'bg-accent/20 text-accent'
-                      : 'bg-telemetry/20 text-telemetry'
-                    : 'text-muted hover:text-ink'
-                }`}
-              >
-                Register
-              </button>
-            </div>
+                      : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  Register Admin
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 rounded-lg border border-telemetry/30 bg-telemetry/10 px-2.5 py-1 text-2xs font-semibold text-telemetry">
+                <Lock className="h-3 w-3" />
+                <span>Admin Provisioned Login</span>
+              </div>
+            )}
           </div>
 
           {/* Error Message Box */}
@@ -291,6 +262,19 @@ export function AuthPortal({ onLoginSuccess }) {
             <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-signal/40 bg-signal/15 p-3 text-xs text-signal animate-fadeIn">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Notice for Officer Portal */}
+          {!isAdminPortal && (
+            <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-edge bg-canvas/60 p-3 text-2xs text-muted">
+              <Shield className="h-4 w-4 text-telemetry shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold text-ink">Authorized Officer Sign-In:</span>
+                <p className="mt-0.5 text-muted leading-relaxed">
+                  Officers cannot register themselves. Credentials (Badge ID & 4-digit PIN) are provisioned exclusively by your Division Administrator.
+                </p>
+              </div>
             </div>
           )}
 
@@ -441,148 +425,6 @@ export function AuthPortal({ onLoginSuccess }) {
           )}
 
           {/* ========================================================= */}
-          {/* C. OFFICER REGISTRATION FORM                              */}
-          {/* ========================================================= */}
-          {mode === 'register' && !isAdminPortal && (
-            <form onSubmit={handleOfficerRegisterSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                    Officer Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Sub-Insp. Ali Raza"
-                    className="mt-1 w-full rounded-xl border border-edge bg-canvas/80 px-3 py-2 text-xs text-ink focus:border-telemetry focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                      Badge ID *
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleGenerateBadge}
-                      className="text-2xs font-semibold text-telemetry hover:underline"
-                    >
-                      Generate
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    required
-                    value={badge}
-                    onChange={(e) => setBadge(e.target.value)}
-                    placeholder="e.g. PTP-5521"
-                    className="mt-1 w-full rounded-xl border border-edge bg-canvas/80 px-3 py-2 font-mono text-xs font-bold uppercase text-telemetry focus:border-telemetry focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                  Official Officer Email *
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="officer.name@traffic.punjab.gov.pk"
-                  className="mt-1 w-full rounded-xl border border-edge bg-canvas/80 px-3 py-2 text-xs text-ink focus:border-telemetry focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                    Assigned Division *
-                  </label>
-                  <select
-                    value={divisionId}
-                    onChange={(e) => {
-                      setDivisionId(e.target.value);
-                      const div = DIVISIONS.find((d) => d.id === e.target.value) || DIVISIONS[0];
-                      setSector(div.sectors[0] || 'Mall Road');
-                    }}
-                    className="mt-1 w-full rounded-xl border border-edge bg-canvas/80 px-3 py-2 text-xs text-ink focus:border-telemetry focus:outline-none"
-                  >
-                    {DIVISIONS.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.shortName} ({d.province})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                    Rank / Role *
-                  </label>
-                  <select
-                    value={rank}
-                    onChange={(e) => setRank(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-edge bg-canvas/80 px-3 py-2 text-xs text-ink focus:border-telemetry focus:outline-none"
-                  >
-                    <option value="Inspector (Senior Audit Warden)">Inspector (Audit Warden)</option>
-                    <option value="Sub-Inspector">Sub-Inspector</option>
-                    <option value="Senior Traffic Warden">Senior Traffic Warden</option>
-                    <option value="Traffic Warden">Traffic Warden</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                    Assigned Sector / Beat
-                  </label>
-                  <select
-                    value={sector}
-                    onChange={(e) => setSector(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-edge bg-canvas/80 px-3 py-2 text-xs text-ink focus:border-telemetry focus:outline-none"
-                  >
-                    {currentDiv.sectors.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-2xs font-bold uppercase tracking-wider text-muted">
-                    Access PIN *
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    maxLength={6}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    placeholder="e.g. 1234"
-                    className="mt-1 w-full rounded-xl border border-edge bg-canvas/80 px-3 py-2 font-mono text-xs text-ink focus:border-telemetry focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-telemetry/60 bg-gradient-to-r from-telemetry to-blue-600 py-3 text-xs font-bold text-black shadow-glow-cyan transition-all hover:scale-[1.01] active:scale-[0.99]"
-              >
-                <UserPlus className="h-4 w-4" />
-                <span>Register Review Officer Account</span>
-              </button>
-            </form>
-          )}
-
-          {/* ========================================================= */}
           {/* D. FAST 1-CLICK DEMO SHORTCUTS                            */}
           {/* ========================================================= */}
           <div className="mt-6 rounded-2xl border border-edge bg-canvas/50 p-3.5">
@@ -620,7 +462,7 @@ export function AuthPortal({ onLoginSuccess }) {
                   }
                   className="rounded-lg border border-telemetry/40 bg-telemetry/15 px-3 py-1.5 text-2xs font-bold text-telemetry hover:bg-telemetry/25 transition"
                 >
-                  Sub-Insp. Zeeshan Ali (PTP-3104)
+                  Officer Zeeshan Ali (PTP-3104)
                 </button>
                 <button
                   type="button"
@@ -629,7 +471,7 @@ export function AuthPortal({ onLoginSuccess }) {
                   }
                   className="rounded-lg border border-edge bg-surface px-3 py-1.5 text-2xs font-medium text-muted hover:text-ink transition"
                 >
-                  Insp. A. Raheem (PTP-2291)
+                  Officer Abdul Raheem (PTP-2291)
                 </button>
                 <button
                   type="button"
@@ -638,7 +480,7 @@ export function AuthPortal({ onLoginSuccess }) {
                   }
                   className="rounded-lg border border-edge bg-surface px-3 py-1.5 text-2xs font-medium text-muted hover:text-ink transition"
                 >
-                  Warden Hamza Tariq (PTP-4519)
+                  Officer Hamza Tariq (PTP-4519)
                 </button>
               </div>
             )}

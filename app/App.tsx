@@ -21,6 +21,7 @@ import { ChangePassword } from './src/pages/mobile/ChangePassword';
 import { ReportOutcome } from './src/pages/mobile/ReportOutcome';
 import { BottomNav } from './src/components/mobile/BottomNav';
 import type { AiEvidentiaryResult } from './src/lib/aiAnalysis';
+import * as Linking from 'expo-linking';
 
 function MainApp() {
   const { colors } = useTheme();
@@ -123,6 +124,26 @@ function MainApp() {
       mounted = false;
       data.subscription.unsubscribe();
       supabase.removeChannel(notifChannel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleDeepLink = (event: { url: string }) => {
+      try {
+        const parsed = Linking.parse(event.url);
+        if (parsed.hostname === 'wallet' || parsed.path?.includes('wallet')) {
+          setActiveScreen('wallet');
+        }
+      } catch {}
+    };
+
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink({ url });
+    });
+
+    return () => {
+      subscription.remove();
     };
   }, []);
 

@@ -172,7 +172,7 @@ export function Vault() {
   // Evidentiary Detail Dossier & Full-Screen Zoom Lightbox States
   const [selectedReport, setSelectedReport] = useState<ReportRow | null>(null);
   const [zoomFrameIndex, setZoomFrameIndex] = useState<number | null>(null);
-  const vaultLightboxScrollRef = useRef<ScrollView>(null);
+  const vaultLightboxScrollRef = useRef<any>(null);
 
   useEffect(() => {
     if (zoomFrameIndex !== null) {

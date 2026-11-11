@@ -21,6 +21,8 @@ export function CommandSidebar({
   disputedCount,
   approvedCount,
   rejectedCount,
+  myApprovedCount,
+  myReviewedCount,
   divisionOfficersCount = 0,
   currentDivision,
   currentRole = 'review_officer',
@@ -36,7 +38,7 @@ export function CommandSidebar({
       Icon: Inbox,
       badge: pendingCount > 0 ? String(pendingCount) : undefined,
       badgeTone: 'bg-accent/20 text-accent border-accent/40',
-      description: 'Awaiting certified warden audit',
+      description: 'Awaiting certified officer audit',
     },
     {
       key: 'Disputed Cases',
@@ -50,9 +52,14 @@ export function CommandSidebar({
       key: 'Approved Today',
       label: 'Approved Today',
       Icon: CheckCircle2,
-      badge: approvedCount > 0 ? String(approvedCount) : undefined,
+      badge:
+        !isAdmin && myApprovedCount !== undefined && myApprovedCount > 0
+          ? `${myApprovedCount} (${approvedCount})`
+          : approvedCount > 0
+          ? String(approvedCount)
+          : undefined,
       badgeTone: 'bg-valid/20 text-valid border-valid/40',
-      description: 'Issued e-citations & paid bounties',
+      description: !isAdmin ? 'My approved & division citations' : 'Issued e-citations & paid bounties',
     },
     {
       key: 'Rejected Cases',
@@ -186,15 +193,24 @@ export function CommandSidebar({
               <p className="truncate text-muted">{currentDivision?.hq}</p>
             </div>
           ) : (
-            <div className="mt-2 space-y-1 text-2xs text-muted border-t border-edge/60 pt-2">
+            <div className="mt-2 space-y-1.5 text-2xs text-muted border-t border-edge/60 pt-2">
+              <div className="flex items-center gap-1.5">
+                <UserCheck className="h-3 w-3 text-telemetry shrink-0" />
+                <span className="truncate font-semibold text-ink">
+                  {currentUser?.name || 'Review Officer'}
+                </span>
+                <span className="font-mono text-accent">({currentUser?.badge || 'PTP'})</span>
+              </div>
               <div className="flex items-center gap-1.5">
                 <MapPin className="h-3 w-3 text-telemetry shrink-0" />
-                <span className="truncate">Sector: {currentUser?.sector || 'Mall Road'}</span>
+                <span className="truncate">Sector: {currentUser?.sector || 'General Enforcement'}</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Shield className="h-3 w-3 text-muted shrink-0" />
-                <span className="truncate">Admin: {currentDivision?.admin?.name}</span>
-              </div>
+              {myReviewedCount !== undefined && (
+                <div className="flex items-center justify-between rounded bg-surface/80 px-2 py-1 text-2xs font-semibold text-ink">
+                  <span className="text-muted">My Decisions Today:</span>
+                  <span className="tabular font-bold text-valid">{myReviewedCount}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

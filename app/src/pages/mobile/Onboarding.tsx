@@ -590,7 +590,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={colors.canvas} />
+      <StatusBar barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'} />
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         {/* Header */}
         <View style={styles.header}>
